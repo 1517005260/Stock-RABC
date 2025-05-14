@@ -1,0 +1,72 @@
+# Django 相关
+*.log
+*.pot
+*.pyc
+__pycache__/
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+staticfiles/
+
+# Django 虚拟环境
+venv/
+env/
+ENV/
+.env
+.venv
+env.bak/
+venv.bak/
+
+# Django 测试和覆盖率报告
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Vue 相关
+.DS_Store
+node_modules/
+/dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# Vue 本地环境文件
+.env.local
+.env.*.local
+
+# Vue 测试和构建文件
+/tests/e2e/videos/
+/tests/e2e/screenshots/
+/tests/unit/coverage/
+
+# 编辑器目录和文件
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.project
+.classpath
+.settings/
+
+# 其他常见忽略文件
+.DS_Store
+Thumbs.db
+*.bak
+*.tmp
+*.swp
+*~.nib
