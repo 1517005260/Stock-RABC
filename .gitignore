@@ -6,6 +6,7 @@ __pycache__/
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
+db_user.sqlite3
 staticfiles/
 
 # Django 虚拟环境

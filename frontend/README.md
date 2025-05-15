@@ -51,6 +51,10 @@ npm install
 npm run serve
 ```
 
+出现这个报错：`'vue-cli-service' 不是内部或外部命令，也不是可运行的程序或批处理文件。`
+
+解决：`npm install @vue/cli-service `
+
 启动成功后，访问 http://localhost:8080 (默认端口)
 
 ### 构建生产环境

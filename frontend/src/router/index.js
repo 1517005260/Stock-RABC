@@ -1,5 +1,4 @@
 import {createRouter, createWebHashHistory} from 'vue-router'
-import HomeView from '../views/HomeView.vue'
 
 const routes = [
   {
@@ -31,17 +30,17 @@ const routes = [
       {
         path: '/bsns/department',
         name: '部门管理',
-        component: () => import('../views/bsns/Department')
+        component: () => import('../views/bsns/Department.vue')
       },
       {
         path: '/bsns/post',
         name: '岗位管理',
-        component: () => import('../views/bsns/Post')
+        component: () => import('../views/bsns/Post.vue')
       },
       {
         path: '/userCenter',
         name: '个人中心',
-        component: () => import('../views/userCenter/index')
+        component: () => import('../views/userCenter/index.vue')
       }
     ]
   },
@@ -49,12 +48,36 @@ const routes = [
     path: '/login',
     name: 'login',
     component: () => import('../views/Login.vue')
+  },
+  {
+    path: '/:pathMatch(.*)*',
+    name: '404',
+    component: () => import('../views/404.vue')
   }
 ]
 
 const router = createRouter({
   history: createWebHashHistory(),
   routes
+})
+
+// 添加路由守卫
+router.beforeEach((to, from, next) => {
+  const token = sessionStorage.getItem('token')
+  
+  if (to.path === '/login') {
+    if (token) {
+      next('/')
+    } else {
+      next()
+    }
+  } else {
+    if (!token) {
+      next('/login')
+    } else {
+      next()
+    }
+  }
 })
 
 export default router

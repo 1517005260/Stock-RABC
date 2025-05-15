@@ -8,62 +8,84 @@
       @tab-click="clickTab"
   >
     <el-tab-pane
-        v-for="item in editableTabs"
-        :key="item.name"
+        v-for="(item, index) in editableTabs"
+        :key="index"
         :label="item.title"
         :name="item.name"
-    >
-      {{ item.content }}
-    </el-tab-pane>
+    />
   </el-tabs>
 </template>
 
 <script setup>
-import {ref, watch} from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import store from "@/store";
-import {useRouter} from 'vue-router'
+import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 
 const router = useRouter()
 
-const editableTabsValue = ref(store.state.editableTabsValue)
-const editableTabs = ref(store.state.editableTabs)
+const editableTabsValue = ref('/index')
+const editableTabs = ref([{title: '首页', name: '/index'}])
 
+// 安全移除标签页
 const removeTab = (targetName) => {
-  const tabs = editableTabs.value
-  let activeName = editableTabsValue.value
-  if (activeName === targetName) {
-    tabs.forEach((tab, index) => {
-      if (tab.name === targetName) {
-        const nextTab = tabs[index + 1] || tabs[index - 1]
-        if (nextTab) {
-          activeName = nextTab.name
-        }
-      }
-    })
+  try {
+    if (!targetName) return
+    
+    store.commit('REMOVE_TAB', targetName)
+    
+    // 同步本地状态与store状态
+    editableTabsValue.value = store.state.editableTabsValue
+    editableTabs.value = store.state.editableTabs
+    
+    // 更新路由
+    router.push({path: editableTabsValue.value})
+  } catch (error) {
+    console.error('移除标签页失败:', error)
+    ElMessage.error('操作失败，请重试')
   }
-
-  editableTabsValue.value = activeName
-  editableTabs.value = tabs.filter((tab) => tab.name !== targetName)
-
-  store.state.editableTabsValue = editableTabsValue.value
-  store.state.editableTabs = editableTabs.value
-
-  router.push({path:activeName})
 }
 
+// 安全点击标签页
 const clickTab = (target) => {
-  console.log(target.props.label)
-  router.push({name: target.props.label})
+  try {
+    if (target && target.props && target.props.name) {
+      router.push({path: target.props.name})
+    }
+  } catch (error) {
+    console.error('标签页点击处理失败:', error)
+  }
 }
 
+// 初始化同步state
 const refreshTabs = () => {
-  editableTabsValue.value = store.state.editableTabsValue
-  editableTabs.value = store.state.editableTabs
+  if (store.state.editableTabs && store.state.editableTabs.length) {
+    editableTabsValue.value = store.state.editableTabsValue
+    editableTabs.value = [...store.state.editableTabs]
+  } else {
+    // 使用默认值
+    editableTabsValue.value = '/index'
+    editableTabs.value = [{title: '首页', name: '/index'}]
+    
+    // 同步回store
+    store.commit('RESET_TABS')
+  }
 }
 
-watch(store.state, () => {
+// 监听store变化
+watch(() => store.state.editableTabs, () => {
   refreshTabs()
-}, {deep: true, immediate: true})
+}, {deep: true})
+
+watch(() => store.state.editableTabsValue, (newVal) => {
+  if (newVal) {
+    editableTabsValue.value = newVal
+  }
+})
+
+onMounted(() => {
+  refreshTabs()
+})
 </script>
 
 <style>

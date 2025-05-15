@@ -1,13 +1,10 @@
 <template>
   <div class="login">
-
     <el-form ref="loginRef" :model="loginForm" :rules="loginRules" class="login-form">
       <h3 class="title">Django后台管理系统</h3>
 
       <el-form-item prop="username">
-
         <el-input
-
             v-model="loginForm.username"
             type="text"
             size="large"
@@ -19,12 +16,12 @@
       </el-form-item>
       <el-form-item prop="password">
         <el-input
-
             v-model="loginForm.password"
             type="password"
             size="large"
             auto-complete="off"
             placeholder="密码"
+            @keyup.enter="handleLogin"
         >
           <template #prefix><svg-icon icon="password" /></template>
         </el-input>
@@ -36,25 +33,24 @@
             type="primary"
             style="width:100%;"
             @click.prevent="handleLogin"
+            :loading="loading"
         >
           <span>登 录</span>
-
         </el-button>
       </el-form-item>
     </el-form>
-    <!-- 底部 -->
-
   </div>
 </template>
 
 <script setup>
-import {ref} from 'vue'
+import {ref, onMounted} from 'vue'
 import requestUtil from '@/util/request'
 import qs from 'qs'
 import {ElMessage} from "element-plus";
 import Cookies from "js-cookie";
 import {encrypt, decrypt} from "@/util/jsencrypt";
 import router from "@/router";
+import store from "@/store";
 
 const loginForm = ref({
   username: '',
@@ -62,6 +58,7 @@ const loginForm = ref({
   rememberMe: false
 })
 
+const loading = ref(false)
 const loginRef = ref(null)
 
 const loginRules = {
@@ -69,54 +66,90 @@ const loginRules = {
   password: [{required: true, trigger: "blur", message: "请输入您的密码"}],
 };
 
-
 const handleLogin = () => {
-  loginRef.value.validate(async (valid) => {
+  if (loading.value) return
+  
+  loginRef.value?.validate(async (valid) => {
     if (valid) {
-      let result = await requestUtil.post("user/login?" + qs.stringify(loginForm.value))
-      console.log(result)
-      let data = result.data
-      if (data.code == 200) {
-        ElMessage.success(data.info)
-        window.sessionStorage.setItem("token", data.token)
-        const currentUser = data.user
-        currentUser.roles=data.roles
-        window.sessionStorage.setItem("currentUser", JSON.stringify(currentUser))
-        window.sessionStorage.setItem("menuList", JSON.stringify(data.menuList))
-        // 勾选了需要记住密码设置在cookie中设置记住用户名和密码
-        if (loginForm.value.rememberMe) {
-          Cookies.set("username", loginForm.value.username, {expires: 30});
-          Cookies.set("password", encrypt(loginForm.value.password), {expires: 30});
-          Cookies.set("rememberMe", loginForm.value.rememberMe, {expires: 30});
+      try {
+        loading.value = true
+        let result = await requestUtil.post("user/login?" + qs.stringify(loginForm.value))
+        let data = result.data
+        if (data.code == 200) {
+          ElMessage.success(data.info || "登录成功")
+          
+          // 使用Vuex存储登录状态
+          store.commit('SET_TOKEN', data.token)
+          store.commit('SET_CURRENT_USER', data.user)
+          store.commit('SET_MENU_LIST', data.menuList)
+          
+          // 也存在sessionStorage中，兼容旧代码
+          window.sessionStorage.setItem("token", data.token)
+          window.sessionStorage.setItem("currentUser", JSON.stringify(data.user))
+          window.sessionStorage.setItem("menuList", JSON.stringify(data.menuList))
+          
+          // 勾选了需要记住密码设置在cookie中设置记住用户名和密码
+          if (loginForm.value.rememberMe) {
+            Cookies.set("username", loginForm.value.username, {expires: 30});
+            Cookies.set("password", encrypt(loginForm.value.password), {expires: 30});
+            Cookies.set("rememberMe", loginForm.value.rememberMe, {expires: 30});
+          } else {
+            // 否则移除
+            Cookies.remove("username");
+            Cookies.remove("password");
+            Cookies.remove("rememberMe");
+          }
+          
+          // 重置标签页
+          store.commit('RESET_TABS')
+          
+          // 跳转首页
+          router.replace('/')
         } else {
-          // 否则移除
-          Cookies.remove("username");
-          Cookies.remove("password");
-          Cookies.remove("rememberMe");
+          ElMessage.error(data.info || "登录失败")
         }
-        router.replace('/')
-      } else {
-        ElMessage.error(data.info)
+      } catch (error) {
+        ElMessage.error("登录请求失败，请检查网络连接")
+        console.error("登录失败:", error)
+      } finally {
+        loading.value = false
       }
     } else {
-      console.log("验证失败")
+      ElMessage.warning("请正确填写登录信息")
     }
   })
 }
 
-function getCookie() {
-  const username = Cookies.get("username");
-  const password = Cookies.get("password");
-  const rememberMe = Cookies.get("rememberMe");
-  loginForm.value = {
-    username: username === undefined ? loginForm.value.username : username,
-    password: password === undefined ? loginForm.value.password : decrypt(password),
-    rememberMe: rememberMe === undefined ? false : Boolean(rememberMe),
+// 从Cookie获取记住的登录信息
+const getCookie = () => {
+  try {
+    const username = Cookies.get("username");
+    const password = Cookies.get("password");
+    const rememberMe = Cookies.get("rememberMe");
+    
+    if (username) {
+      loginForm.value.username = username
+    }
+    
+    if (password) {
+      try {
+        loginForm.value.password = decrypt(password)
+      } catch (e) {
+        console.error("密码解密失败:", e)
+      }
+    }
+    
+    if (rememberMe) {
+      loginForm.value.rememberMe = rememberMe === "true" || rememberMe === true
+    }
+  } catch (error) {
+    console.error("读取Cookie失败:", error)
   }
 }
 
-getCookie();
-
+onMounted(() => {
+  getCookie();
+})
 </script>
 
 <style lang="scss" scoped>
