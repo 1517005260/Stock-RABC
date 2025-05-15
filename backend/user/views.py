@@ -9,7 +9,7 @@ from rest_framework.settings import api_settings
 from rest_framework_jwt.settings import api_settings
 
 from app import settings
-from menu.models import SysMenu, SysMenuSerializer
+# from menu.models import SysMenu, SysMenuSerializer
 from role.models import SysRole, SysUserRole
 from user.models import SysUser, SysUserSerializer
 
@@ -17,25 +17,16 @@ from user.models import SysUser, SysUserSerializer
 # @method_decorator(csrf_exempt, name='dispatch')
 class LoginView(APIView):
 
-    def buildTreeMenu(self, sysMenuList):
-        resultMenuList: list[SysMenu] = list()
-        for menu in sysMenuList:
-            #  寻找子节点
-            for e in sysMenuList:
-                if e.parent_id == menu.id:
-                    if not hasattr(menu, "children"):
-                        menu.children = list()
-                    menu.children.append(e)
-            #  判断父节点，添加到集合
-            if menu.parent_id == 0:
-                resultMenuList.append(menu)
-        return resultMenuList
-
     def post(self, request):
         username = request.GET.get("username")
         password = request.GET.get("password")
         try:
             user = SysUser.objects.get(username=username, password=password)
+            
+            # 检查用户状态，只允许正常状态（status=1）的用户登录
+            if user.status == 0:
+                return JsonResponse({'code': 403, 'info': '账号已被禁用，请联系管理员！'})
+                
             jwt_payload_handler = api_settings.JWT_PAYLOAD_HANDLER
             jwt_encode_handler = api_settings.JWT_ENCODE_HANDLER
             # 将用户对象传递进去，获取到该对象的属性值
@@ -43,39 +34,53 @@ class LoginView(APIView):
             # 将属性值编码成jwt格式的字符串
             token = jwt_encode_handler(payload)
 
-            roleList = SysRole.objects.raw("select id, name from sys_role where id in (select role_id from "
+            roleList = SysRole.objects.raw("select id, name, code from sys_role where id in (select role_id from "
                                            "sys_user_role where user_id=" + str(user.id) + ")")
 
             print(roleList)
 
             # 获取当前用户所有的角色，逗号隔开
             roles = ",".join([role.name for role in roleList])
+            
+            # 将用户数据序列化
+            user_data = SysUserSerializer(user).data
+            # 添加角色信息到用户数据
+            user_data['roles'] = roles
+            
+            # 添加权限信息
+            permissions = []
+            is_admin = False
+            
+            # 检查是否是管理员角色
+            for role in roleList:
+                if role.code == 'admin' or role.name == '管理员':
+                    is_admin = True
+                    break
+            
+            # 如果是管理员，添加所有权限
+            if is_admin:
+                # 这里添加所有系统权限标识符
+                permissions = [
+                    'system:user:list', 'system:user:edit', 'system:user:remove', 'system:user:reset',
+                    'system:role:list', 'system:role:edit', 'system:role:remove',
+                    'system:menu:list', 'system:menu:edit', 'system:menu:remove'
+                ]
+            else:
+                # 这里应该基于角色获取实际权限
+                # 临时允许基本权限，后续可以完善
+                permissions = ['system:user:list', 'system:role:list']
 
-            menuSet: set[SysMenu] = set()
-            for row in roleList:
-                print(row.id, row.name)
-                menuList = SysMenu.objects.raw("select * from sys_menu where id in (select menu_id from "
-                                               "sys_role_menu where role_id =" + str(row.id) + ")")
-                for row2 in menuList:
-                    print(row2.id, row2.name)
-                    menuSet.add(row2)
-            print(menuSet)
-            menuList: list[SysMenu] = list(menuSet)  # set转list
-            sorted_menuList = sorted(menuList)  # 根据order_num排序
-            print(sorted_menuList)
-            #  构造菜单树
-            sysMenuList: list[SysMenu] = self.buildTreeMenu(sorted_menuList)
-            print(sysMenuList)
-            serializerMenuList = list()
-            for sysMenu in sysMenuList:
-                serializerMenuList.append(SysMenuSerializer(sysMenu).data)
+            return JsonResponse({
+                'code': 200, 
+                'info': '登录成功', 
+                'token': token, 
+                'user': user_data,
+                'permissions': permissions
+            })
 
         except Exception as e:
             print(e)
-            return JsonResponse({'code': 500, 'info': '用户名或者密码错误！'})
-        return JsonResponse(
-            {'code': 200, 'token': token, 'user': SysUserSerializer(user).data, 'info': '登录成功', 'roles': roles,
-             'menuList': serializerMenuList})
+            return JsonResponse({'code': 500, 'info': '用户不存在或密码错误！'})
 
 
 # @method_decorator(csrf_exempt, name='dispatch')
@@ -119,7 +124,7 @@ class SaveView(APIView):
         if data['id'] == -1:  # 添加
             obj_sysUser = SysUser(username=data['username'], password=data['password'], email=data['email'],
                                   phonenumber=data['phonenumber'], status=data['status'], remark=data['remark'])
-            obj_sysUser.create_time = datetime.now().date()
+            obj_sysUser.create_time = datetime.now()
             obj_sysUser.avatar = 'default.jpg'
             obj_sysUser.password = '123456'
 
@@ -129,8 +134,19 @@ class SaveView(APIView):
                                   avatar=data['avatar'], email=data['email'], phonenumber=data['phonenumber'],
                                   login_date=data['login_date'], status=data['status'], create_time=data['create_time'],
                                   update_time=data['update_time'], remark=data['remark'])
-            obj_sysUser.update_time = datetime.now().date()
+            obj_sysUser.update_time = datetime.now()
             obj_sysUser.save()
+            
+            # 获取用户角色信息，添加到响应中
+            user_data = SysUserSerializer(obj_sysUser).data
+            try:
+                roleList = SysRole.objects.raw("select id, name from sys_role where id in (select role_id from "
+                                              "sys_user_role where user_id=" + str(data['id']) + ")")
+                roles = ",".join([role.name for role in roleList])
+                user_data['roles'] = roles
+                return JsonResponse({'code': 200, 'user': user_data})
+            except Exception as e:
+                print(f"获取用户角色失败: {e}")
 
         return JsonResponse({'code': 200})
 
@@ -179,7 +195,7 @@ class PwdView(APIView):
         obj_user = SysUser.objects.get(id=id)
         if obj_user.password == oldPassword:
             obj_user.password = newPassword
-            obj_user.update_time = datetime.now().date()
+            obj_user.update_time = datetime.now()
             obj_user.save()
             return JsonResponse({'code': 200})
         else:
@@ -252,7 +268,7 @@ class PasswordView(APIView):
         id = request.GET.get("id")
         user_object = SysUser.objects.get(id=id)
         user_object.password = "123456"
-        user_object.update_time = datetime.now().date()
+        user_object.update_time = datetime.now()
         user_object.save()
         return JsonResponse({'code': 200})
 
@@ -281,3 +297,66 @@ class GrantRole(APIView):
             userRole = SysUserRole(user_id=user_id, role_id=roleId)
             userRole.save()
         return JsonResponse({'code': 200})
+
+
+# 获取当前用户信息
+class CurrentUserView(APIView):
+    def get(self, request):
+        try:
+            # 从请求头获取token
+            auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+            if not auth_header:
+                return JsonResponse({'code': 401, 'msg': '未授权'})
+            
+            # 解析token获取用户信息
+            token = auth_header.split(' ')[1] if len(auth_header.split(' ')) > 1 else auth_header
+            jwt_decode_handler = api_settings.JWT_DECODE_HANDLER
+            payload = jwt_decode_handler(token)
+            user_id = payload.get('user_id')
+            
+            # 获取用户信息
+            user = SysUser.objects.get(id=user_id)
+            user_data = SysUserSerializer(user).data
+            
+            # 获取用户角色
+            roleList = SysRole.objects.raw("select id, name, code from sys_role where id in (select role_id from "
+                                          "sys_user_role where user_id=" + str(user_id) + ")")
+            
+            # 获取当前用户所有的角色，逗号隔开
+            roles = ",".join([role.name for role in roleList])
+            user_data['roles'] = roles
+            
+            # 添加权限信息
+            permissions = []
+            is_admin = False
+            
+            # 检查是否是管理员角色
+            for role in roleList:
+                if role.code == 'admin' or role.name == '管理员':
+                    is_admin = True
+                    break
+            
+            # 如果是管理员，添加所有权限
+            if is_admin:
+                # 这里添加所有系统权限标识符
+                permissions = [
+                    'system:user:list', 'system:user:edit', 'system:user:remove', 'system:user:reset',
+                    'system:role:list', 'system:role:edit', 'system:role:remove',
+                    'system:menu:list', 'system:menu:edit', 'system:menu:remove'
+                ]
+            else:
+                # 这里应该基于角色获取实际权限
+                # 临时允许基本权限，后续可以完善
+                permissions = ['system:user:list', 'system:role:list']
+            
+            user_data['permissions'] = permissions
+            
+            # 将权限保存到会话中以便前端访问
+            return JsonResponse({
+                'code': 200, 
+                'user': user_data, 
+                'permissions': permissions
+            })
+        except Exception as e:
+            print(f"获取当前用户信息失败: {e}")
+            return JsonResponse({'code': 500, 'msg': '获取用户信息失败'})

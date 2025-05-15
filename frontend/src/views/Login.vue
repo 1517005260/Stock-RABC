@@ -81,12 +81,15 @@ const handleLogin = () => {
           // 使用Vuex存储登录状态
           store.commit('SET_TOKEN', data.token)
           store.commit('SET_CURRENT_USER', data.user)
-          store.commit('SET_MENU_LIST', data.menuList)
+          
+          // 存储权限信息
+          if (data.permissions) {
+            store.commit('SET_PERMISSIONS', data.permissions)
+          }
           
           // 也存在sessionStorage中，兼容旧代码
           window.sessionStorage.setItem("token", data.token)
           window.sessionStorage.setItem("currentUser", JSON.stringify(data.user))
-          window.sessionStorage.setItem("menuList", JSON.stringify(data.menuList))
           
           // 勾选了需要记住密码设置在cookie中设置记住用户名和密码
           if (loginForm.value.rememberMe) {

@@ -58,7 +58,20 @@ const handleSubmit = () => {
       let data = result.data;
       if (data.code == 200) {
         ElMessage.success("执行成功！")
-        window.sessionStorage.setItem("currentUser", JSON.stringify(form.value))
+        
+        // 如果返回了完整的用户数据，使用返回的数据
+        if (data.user) {
+          sessionStorage.setItem("currentUser", JSON.stringify(data.user))
+        } else {
+          // 保持原始roles信息
+          const updatedUser = { ...form.value }
+          // 确保保留角色信息
+          const currentUserData = JSON.parse(sessionStorage.getItem("currentUser") || '{}')
+          if (currentUserData.roles) {
+            updatedUser.roles = currentUserData.roles
+          }
+          sessionStorage.setItem("currentUser", JSON.stringify(updatedUser))
+        }
       }
     }
   })

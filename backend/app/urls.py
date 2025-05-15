@@ -24,7 +24,7 @@ urlpatterns = [
     # path('admin/', admin.site.urls),
     path('user/', include('user.urls')),
     path('role/', include('role.urls')),
-    path('menu/', include(('menu.urls', 'menu'), namespace='menu')),
+    # path('menu/', include(('menu.urls', 'menu'), namespace='menu')),
     # 配置媒体文件的路由文件
     re_path('media/(?P<path>.*)', serve, {'document_root': settings.MEDIA_ROOT}, name='media')
 ]

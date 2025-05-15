@@ -1,4 +1,6 @@
 import {createRouter, createWebHashHistory} from 'vue-router'
+import store from '@/store'
+import { ElMessage } from 'element-plus'
 
 const routes = [
   {
@@ -10,49 +12,54 @@ const routes = [
       {
         path: '/index',
         name: '首页',
-        component: () => import('../views/index/index.vue')
+        component: () => import('../views/index/index.vue'),
+        meta: { title: '首页', requiresAuth: true }
       },
       {
         path: '/sys/user',
         name: '用户管理',
-        component: () => import('../views/sys/user/index.vue')
+        component: () => import('../views/sys/user/index.vue'),
+        meta: { 
+          title: '用户管理', 
+          requiresAuth: true,
+          permissions: ['system:user:list']
+        }
       },
       {
         path: '/sys/role',
         name: '角色管理',
-        component: () => import('../views/sys/role/index.vue')
-      },
-      {
-        path: '/sys/menu',
-        name: '菜单管理',
-        component: () => import('../views/sys/menu/index.vue')
-      },
-      {
-        path: '/bsns/department',
-        name: '部门管理',
-        component: () => import('../views/bsns/Department.vue')
-      },
-      {
-        path: '/bsns/post',
-        name: '岗位管理',
-        component: () => import('../views/bsns/Post.vue')
+        component: () => import('../views/sys/role/index.vue'),
+        meta: { 
+          title: '角色管理', 
+          requiresAuth: true,
+          permissions: ['system:role:list']
+        }
       },
       {
         path: '/userCenter',
         name: '个人中心',
-        component: () => import('../views/userCenter/index.vue')
+        component: () => import('../views/userCenter/index.vue'),
+        meta: { title: '个人中心', requiresAuth: true }
       }
     ]
   },
   {
     path: '/login',
     name: 'login',
-    component: () => import('../views/Login.vue')
+    component: () => import('../views/Login.vue'),
+    meta: { title: '登录', requiresAuth: false }
+  },
+  {
+    path: '/403',
+    name: '403',
+    component: () => import('../views/403.vue'),
+    meta: { title: '权限不足', requiresAuth: false }
   },
   {
     path: '/:pathMatch(.*)*',
     name: '404',
-    component: () => import('../views/404.vue')
+    component: () => import('../views/404.vue'),
+    meta: { title: '页面不存在', requiresAuth: false }
   }
 ]
 
@@ -63,21 +70,47 @@ const router = createRouter({
 
 // 添加路由守卫
 router.beforeEach((to, from, next) => {
+  // 设置页面标题
+  if (to.meta.title) {
+    document.title = to.meta.title + ' - 管理系统'
+  }
+  
   const token = sessionStorage.getItem('token')
   
+  // 如果是前往登录页面
   if (to.path === '/login') {
     if (token) {
+      // 已登录，跳转到首页
       next('/')
     } else {
+      // 未登录，允许访问登录页
       next()
     }
-  } else {
-    if (!token) {
-      next('/login')
-    } else {
-      next()
+    return
+  }
+  
+  // 如果是前往其他页面，检查是否已登录
+  if (!token) {
+    // 未登录，跳转到登录页
+    next('/login')
+    return
+  }
+  
+  // 检查路由是否需要特定权限
+  if (to.meta.permissions && to.meta.permissions.length > 0) {
+    const hasPermission = to.meta.permissions.some(permission => 
+      store.getters.hasPermission(permission)
+    )
+    
+    if (!hasPermission) {
+      ElMessage.error('权限不足，无法访问')
+      next('/403') // 跳转到403页面
+      return
     }
   }
+  
+  // 通过所有检查，允许访问
+  next()
 })
 
 export default router

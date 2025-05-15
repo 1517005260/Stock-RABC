@@ -23,14 +23,11 @@
       <el-table-column prop="code" label="权限字符" width="200" align="center"/>
       <el-table-column prop="create_time" label="创建时间" width="200" align="center"/>
       <el-table-column prop="remark" label="备注"/>
-      <el-table-column prop="action" label="操作" width="400" fixed="right" align="center">
+      <el-table-column prop="action" label="操作" width="200" fixed="right" align="center">
         <template v-slot="scope">
-          <el-button type="primary" :icon="Tools" @click="handleMenuDialogValue(scope.row.id)">分配权限</el-button>
+          <el-button type="primary" :icon="Edit" @click="handleDialogValue(scope.row.id)"/>
 
-          <el-button v-if="scope.row.code!='admin'" type="primary" :icon="Edit"
-                     @click="handleDialogValue(scope.row.id)"/>
-
-          <el-popconfirm v-if="scope.row.code!='admin'" title="您确定要删除这条记录吗？" @confirm="handleDelete(scope.row.id)">
+          <el-popconfirm title="您确定要删除这条记录吗？" @confirm="handleDelete(scope.row.id)">
             <template #reference>
               <el-button type="danger" :icon="Delete"/>
             </template>
@@ -50,18 +47,15 @@
   </div>
   <Dialog v-model="dialogVisible" :dialogVisible="dialogVisible" :id="id" :dialogTitle="dialogTitle"
           @initRoleList="initRoleList"></Dialog>
-  <MenuDialog v-model="menuDialogVisible" :menuDialogVisible="menuDialogVisible" :id="id"
-              @initRoleList="initRoleList"></MenuDialog>
 </template>
 
 
 <script setup>
-import {Search, Delete, DocumentAdd, Edit, Tools, RefreshRight} from '@element-plus/icons-vue'
+import {Search, Delete, DocumentAdd, Edit} from '@element-plus/icons-vue'
 import {ref} from 'vue'
 import requestUtil, {getServerUrl} from "@/util/request";
 import Dialog from './components/dialog'
-import MenuDialog from './components/menuDialog'
-import {ElMessage, ElMessageBox} from 'element-plus'
+import {ElMessage} from 'element-plus'
 
 
 const id = ref(-1)
@@ -69,15 +63,6 @@ const id = ref(-1)
 const dialogVisible = ref(false)
 
 const dialogTitle = ref('')
-
-const menuDialogVisible = ref(false)
-
-const handleMenuDialogValue = (roleId) => {
-  if (roleId) {
-    id.value = roleId;
-  }
-  menuDialogVisible.value = true
-}
 
 const handleDialogValue = (roleId) => {
   if (roleId) {

@@ -40,7 +40,7 @@ INSTALLED_APPS = [
     'rest_framework_jwt',
     'user.apps.UserConfig',
     'role.apps.RoleConfig',
-    'menu.apps.MenuConfig',
+    # 'menu.apps.MenuConfig',
 ]
 
 MIDDLEWARE = [
@@ -51,7 +51,8 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'user.middleware.JwtAuthenticationMiddleware'
+    'user.middleware.JwtAuthenticationMiddleware',
+    'user.middleware.PermissionMiddleware'
 ]
 
 CORS_ORIGIN_ALLOW_ALL = True
@@ -105,7 +106,7 @@ DATABASE_ROUTERS = ['utils.router.DatabaseAppsRouter']
 DATABASE_APPS_MAPPING = {
     'user': 'db_user',
     'role': 'db_user',
-    'menu': 'db_user',
+    # 'menu': 'db_user',
 }
 
 # Password validation

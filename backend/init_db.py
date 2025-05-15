@@ -25,6 +25,6 @@ call_command('migrate', '--database=default')
 print("为用户数据库应用迁移...")
 call_command('migrate', 'user', '--database=db_user')
 call_command('migrate', 'role', '--database=db_user')
-call_command('migrate', 'menu', '--database=db_user')
+# call_command('migrate', 'menu', '--database=db_user')
 
 print("数据库迁移完成！")

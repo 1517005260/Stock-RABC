@@ -1,3 +1,1 @@
-# Django + Vue 用户权限管理系统
-
-Forked From：https://github.com/nicholas-lincoln/django-admin
+# 软件工程大作业： Django + Vue 用户权限管理系统

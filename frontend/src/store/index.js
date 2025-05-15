@@ -11,111 +11,74 @@ export default createStore({
     ],
     currentUser: null,
     token: null,
-    menuList: []
+    permissions: []
   },
   getters: {
     getToken: state => state.token || sessionStorage.getItem('token'),
     getCurrentUser: state => state.currentUser || JSON.parse(sessionStorage.getItem('currentUser') || '{}'),
-    getMenuList: state => state.menuList || JSON.parse(sessionStorage.getItem('menuList') || '[]')
+    getPermissions: state => {
+      if (state.permissions && state.permissions.length > 0) {
+        return state.permissions
+      }
+      
+      const storedPermissions = sessionStorage.getItem('permissions')
+      return storedPermissions ? JSON.parse(storedPermissions) : []
+    },
+    hasPermission: (state, getters) => (permission) => {
+      const permissions = getters.getPermissions
+      const userRoles = getters.getCurrentUser.roles || ''
+      
+      if (userRoles.includes('管理员')) {
+        return true
+      }
+      
+      return permissions.includes(permission)
+    }
   },
   mutations: {
-    // Tabs 相关操作
-    ADD_TABS: (state, tab) => {
-      if (!tab || !tab.path) return
-      
-      if (state.editableTabs.findIndex(e => e.name === tab.path) === -1) {
-        state.editableTabs.push({
-          title: tab.name,
-          name: tab.path
-        });
-      }
-      state.editableTabsValue = tab.path
-    },
-    UPDATE_TAB_VALUE: (state, path) => {
-      if (path) {
-        state.editableTabsValue = path
-      }
-    },
-    REMOVE_TAB: (state, targetName) => {
-      if (!targetName) return
-      
-      const tabs = state.editableTabs
-      let activeName = state.editableTabsValue
-      
-      if (activeName === targetName) {
-        tabs.forEach((tab, index) => {
-          if (tab.name === targetName) {
-            const nextTab = tabs[index + 1] || tabs[index - 1]
-            if (nextTab) {
-              activeName = nextTab.name
-            }
-          }
-        })
-      }
-      
-      state.editableTabsValue = activeName
-      state.editableTabs = tabs.filter(tab => tab.name !== targetName)
-    },
-    RESET_TABS: (state) => {
-      state.editableTabsValue = '/index';
-      state.editableTabs = [
-        {
-          title: '首页',
-          name: '/index'
-        }
-      ]
-    },
-    
-    // 用户认证相关操作
-    SET_TOKEN: (state, token) => {
+    SET_TOKEN(state, token) {
       state.token = token
-      if (token) {
-        sessionStorage.setItem('token', token)
-      } else {
-        sessionStorage.removeItem('token')
-      }
+      sessionStorage.setItem('token', token)
     },
-    SET_CURRENT_USER: (state, user) => {
+    SET_CURRENT_USER(state, user) {
       state.currentUser = user
-      if (user) {
-        sessionStorage.setItem('currentUser', JSON.stringify(user))
-      } else {
-        sessionStorage.removeItem('currentUser')
-      }
+      sessionStorage.setItem('currentUser', JSON.stringify(user))
     },
-    SET_MENU_LIST: (state, menuList) => {
-      state.menuList = menuList
-      if (menuList) {
-        sessionStorage.setItem('menuList', JSON.stringify(menuList))
-      } else {
-        sessionStorage.removeItem('menuList')
-      }
+    SET_PERMISSIONS(state, permissions) {
+      state.permissions = permissions
+      sessionStorage.setItem('permissions', JSON.stringify(permissions))
     },
-    LOGOUT: (state) => {
+    SET_EDITABLE_TABS(state, tabs) {
+      state.editableTabs = tabs
+    },
+    SET_EDITABLE_TABS_VALUE(state, tabValue) {
+      state.editableTabsValue = tabValue
+    },
+    RESET_TABS(state) {
+      state.editableTabs = [{title: '首页', name: '/index'}]
+      state.editableTabsValue = '/index'
+    },
+    LOGOUT(state) {
       state.token = null
       state.currentUser = null
-      state.menuList = []
-      state.editableTabsValue = '/index'
+      state.permissions = []
+      sessionStorage.removeItem('token')
+      sessionStorage.removeItem('currentUser')
+      sessionStorage.removeItem('permissions')
       state.editableTabs = [{title: '首页', name: '/index'}]
-      sessionStorage.clear()
+      state.editableTabsValue = '/index'
     }
   },
   actions: {
-    login({ commit }, userData) {
-      return new Promise((resolve, reject) => {
-        // 这里可以添加实际的登录API调用
-        // 目前只是模拟存储数据
-        commit('SET_TOKEN', userData.token)
-        commit('SET_CURRENT_USER', userData.user)
-        commit('SET_MENU_LIST', userData.menuList)
-        resolve()
-      })
+    login({ commit }, data) {
+      commit('SET_TOKEN', data.token)
+      commit('SET_CURRENT_USER', data.user)
+      if (data.permissions) {
+        commit('SET_PERMISSIONS', data.permissions)
+      }
     },
     logout({ commit }) {
-      return new Promise((resolve) => {
-        commit('LOGOUT')
-        resolve()
-      })
+      commit('LOGOUT')
     }
   },
   modules: {

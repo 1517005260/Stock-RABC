@@ -71,30 +71,24 @@
             @click="handleRoleDialogValue(scope.row.id, scope.row.roleList || [])"
             >分配角色
           </el-button>
-          <el-popconfirm 
-            v-if="scope.row.username!=='long'" 
-            title="您确定要对这个用户重置密码吗？"
-            @confirm="handleResetPassword(scope.row.id)"
-          >
-            <template #reference>
-              <el-button type="warning" :icon="RefreshRight">重置密码</el-button>
-            </template>
-          </el-popconfirm>
-          <el-button 
-            type="primary" 
-            v-if="scope.row.username!=='long'" 
-            :icon="Edit"
-            @click="handleDialogValue(scope.row.id)"
-          ></el-button>
-          <el-popconfirm 
-            v-if="scope.row.username!=='long'" 
-            title="您确定要删除这条记录吗？"
-            @confirm="handleDelete(scope.row.id)"
-          >
-            <template #reference>
-              <el-button type="danger" :icon="Delete"/>
-            </template>
-          </el-popconfirm>
+          <el-button-group>
+            <el-button 
+              type="primary" 
+              size="small" 
+              @click="handlePwd(scope.row.id)"
+              v-permission="'system:user:reset'"
+            >
+              重置密码
+            </el-button>
+            <el-button 
+              type="danger" 
+              size="small" 
+              @click="handleSelectionRemove([scope.row.id])"
+              v-permission="'system:user:remove'"
+            >
+              删除
+            </el-button>
+          </el-button-group>
         </template>
       </el-table-column>
     </el-table>
@@ -281,6 +275,24 @@ const handleRoleDialogValue = (userId, roleList) => {
   id.value = userId
   sysRoleList.value = Array.isArray(roleList) ? roleList : []
   roleDialogVisible.value = true
+}
+
+const handlePwd = (id) => {
+  if (!id) {
+    ElMessage.warning("用户ID无效")
+    return
+  }
+  
+  handleResetPassword(id)
+}
+
+const handleSelectionRemove = (ids) => {
+  if (ids.length === 0) {
+    ElMessage.warning("请选择要删除的记录")
+    return
+  }
+  
+  handleDelete(ids[0])
 }
 
 onMounted(() => {
