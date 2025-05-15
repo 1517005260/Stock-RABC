@@ -43,8 +43,8 @@ class LoginView(APIView):
             # 将属性值编码成jwt格式的字符串
             token = jwt_encode_handler(payload)
 
-            roleList = SysRole.objects.raw("select id, name from db_user.sys_role where id in (select role_id from\n" +
-                                           "db_user.sys_user_role where user_id=" + str(user.id) + ")")
+            roleList = SysRole.objects.raw("select id, name from sys_role where id in (select role_id from "
+                                           "sys_user_role where user_id=" + str(user.id) + ")")
 
             print(roleList)
 
@@ -54,8 +54,8 @@ class LoginView(APIView):
             menuSet: set[SysMenu] = set()
             for row in roleList:
                 print(row.id, row.name)
-                menuList = SysMenu.objects.raw("select * from db_user.sys_menu where id in (select menu_id from\n" +
-                                               "db_user.sys_role_menu where role_id =" + str(row.id) + ")")
+                menuList = SysMenu.objects.raw("select * from sys_menu where id in (select menu_id from "
+                                               "sys_role_menu where role_id =" + str(row.id) + ")")
                 for row2 in menuList:
                     print(row2.id, row2.name)
                     menuSet.add(row2)
@@ -233,8 +233,8 @@ class SearchView(APIView):
         users = list(obj_users)  # 把外层的容器转成List
         for user in users:
             userId = user['id']
-            roleList = SysRole.objects.raw("select id,name from db_user.sys_role where id in (select role_id from "
-                                           "db_user.sys_user_role where user_id=" + str(userId) + ")")
+            roleList = SysRole.objects.raw("select id,name from sys_role where id in (select role_id from "
+                                           "sys_user_role where user_id=" + str(userId) + ")")
             roleListDict = []
             for role in roleList:
                 roleDict = {}

@@ -24,9 +24,8 @@ import requestUtil,{getServerUrl} from '@/util/request'
 import router from '@/router'
 import store from '@/store'
 
-const currentUser = JSON.parse(sessionStorage.getItem("currentUser"))
-
-const squareUrl = getServerUrl() + 'media/userAvatar/' + currentUser.avatar
+const currentUser = JSON.parse(sessionStorage.getItem("currentUser")) || { avatar: 'default.jpg' }
+const squareUrl = getServerUrl() + 'media/userAvatar/' + (currentUser.avatar || 'default.jpg')
 
 const logout = () => {
   window.sessionStorage.clear()

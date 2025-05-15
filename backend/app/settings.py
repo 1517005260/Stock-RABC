@@ -91,23 +91,12 @@ WSGI_APPLICATION = 'app.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'userdb',
-        'USER': 'postgres',
-        'PASSWORD': '123456',
-        'HOST': '192.168.179.151',
-        'PORT': '5432',
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
     },
     'db_user': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'userdb',
-        'USER': 'postgres',
-        'PASSWORD': '123456',
-        'HOST': '192.168.179.151',
-        'PORT': '5432',
-        'OPTIONS': {
-            'options': '-c search_path=db_user'
-        },
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db_user.sqlite3',
     }
 }
 # 引入数据库路由配置
