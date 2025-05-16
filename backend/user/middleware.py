@@ -5,7 +5,7 @@ from jwt import ExpiredSignatureError, InvalidTokenError, PyJWTError
 from rest_framework_jwt.settings import api_settings
 import json
 
-from role.models import SysRole
+from role.models import SysRole, ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_USER
 from user.models import SysUser
 
 
@@ -74,9 +74,10 @@ class PermissionMiddleware(MiddlewareMixin):
         white_list = [
             "/user/login", 
             "/user/current",
-            "/user/updateUserPwd",
-            "/user/uploadImage",
-            "/user/updateAvatar",
+            "/user/updateUserPwd",  # 修改自己的密码
+            "/user/updateAvatar",   # 修改自己的头像
+            "/user/uploadImage",    # 上传图片
+            "/user/save",          # 修改个人信息
         ]
         path = request.path
         
@@ -101,31 +102,116 @@ class PermissionMiddleware(MiddlewareMixin):
                 [user_id]
             )
             
-            # 如果用户是管理员，无需进一步校验权限
-            for role in user_roles:
-                if role.code == 'admin' or role.name == '管理员':
-                    return None
+            # 角色名称列表和角色代码列表
+            role_names = [role.name for role in user_roles]
+            role_codes = [role.code for role in user_roles]
             
-            # 获取用户权限
+            # 根据角色确定用户的权限
             user_permissions = []
-            for role in user_roles:
-                # 这里应该获取该角色下的所有权限
-                # 为了简化，可以暂时允许所有操作或添加具体的权限检查逻辑
-                # 由于目前权限验证不完整，临时允许用户列表和角色列表的访问
-                if path.startswith('/user/search') or path.startswith('/role/search') or path.startswith('/role/listAll'):
-                    return None
             
-            # 获取当前请求对应的权限标识
-            required_permission = self.get_required_permission(path, request.method)
+            # 检查用户角色类型
+            is_superadmin = ROLE_SUPERADMIN in role_codes or '超级管理员' in role_names
+            is_admin = ROLE_ADMIN in role_codes or '管理员' in role_names
             
-            if required_permission and required_permission not in user_permissions:
-                # 记录日志
-                print(f"权限校验失败: 用户ID={user_id}, URL={path}, 方法={request.method}, 缺少权限={required_permission}")
-                return JsonResponse({
-                    'code': 403, 
-                    'message': '权限不足，无法访问该资源'
-                }, status=403)
+            # 1. 超级管理员拥有所有权限
+            if is_superadmin:
+                # 超级管理员拥有所有权限
+                return None
                 
+            # 2. 管理员有角色管理权限
+            # 用户管理权限 - 仅超级管理员可访问（由前面的条件判断）
+            user_management_urls = [
+                '/user/status',
+                '/user/resetPassword',
+                '/user/action',  # DELETE操作
+                '/user/grantRole',
+            ]
+            
+            # 角色管理权限 - 超级管理员可访问
+            role_management_urls = [
+                '/role/save',
+                '/role/action',  # DELETE操作
+            ]
+            
+            # 3. 如果是普通用户，只能获取列表和修改自己的信息
+            # 普通用户只能访问：
+            # - 用户列表 (仅查看): /user/search
+            # - 角色列表 (仅查看): /role/search, /role/listAll
+            # - 个人信息修改: /user/updateUserPwd, /user/updateAvatar, /user/save
+            
+            # 检查是用户自己的操作
+            is_self_operation = False
+            if path.startswith('/user/'):
+                if 'updateUserPwd' in path or 'updateAvatar' in path or 'save' in path:
+                    is_self_operation = True
+                    
+            # 如果是普通用户，限制访问权限
+            if not is_superadmin and not is_admin:
+                # 只允许访问白名单中的路径
+                allowed_paths = [
+                    '/user/search',  # 用户列表
+                    '/role/search',  # 角色列表
+                    '/role/listAll', # 所有角色列表
+                    '/user/updateUserPwd',  # 修改自己的密码
+                    '/user/updateAvatar',   # 修改自己的头像
+                    '/user/uploadImage',    # 上传图片
+                    '/user/save',          # 修改个人信息
+                ]
+                
+                if path not in allowed_paths:
+                    response = JsonResponse({
+                        'code': 403,
+                        'message': '权限不足，无法访问该资源'
+                    }, status=403)
+                    response['X-Error-Page'] = '/403'  # 添加自定义头，用于前端识别需要重定向
+                    return response
+                    
+            # 如果是管理员，限制访问权限
+            elif is_admin and not is_superadmin:
+                # 管理员不能访问角色管理相关操作
+                if path.startswith('/role/') and path not in ['/role/search', '/role/listAll']:
+                    response = JsonResponse({
+                        'code': 403,
+                        'message': '权限不足，只有超级管理员可以管理角色'
+                    }, status=403)
+                    response['X-Error-Page'] = '/403'
+                    return response
+            
+            # 访问权限检查 - 用户管理
+            if any(path.startswith(url) for url in user_management_urls):
+                # 超级管理员和管理员可以进行用户管理
+                if not (is_admin or is_self_operation):
+                    response = JsonResponse({
+                        'code': 403, 
+                        'message': '权限不足，只有管理员或超级管理员可以进行用户管理'
+                    }, status=403)
+                    response['X-Error-Page'] = '/403'
+                    return response
+                    
+                # 对于用户删除操作，只有超级管理员可以执行
+                if path.startswith('/user/action') and request.method == 'DELETE' and not is_superadmin:
+                    response = JsonResponse({
+                        'code': 403, 
+                        'message': '权限不足，只有超级管理员可以删除用户'
+                    }, status=403)
+                    response['X-Error-Page'] = '/403'
+                    return response
+            
+            # 访问权限检查 - 角色管理
+            if any(path.startswith(url) for url in role_management_urls):
+                if not is_superadmin:
+                    response = JsonResponse({
+                        'code': 403, 
+                        'message': '权限不足，只有超级管理员可以进行角色管理'
+                    }, status=403)
+                    response['X-Error-Page'] = '/403'
+                    return response
+            
+            # 允许所有用户查看列表
+            if path.startswith('/user/search') or path.startswith('/role/search') or path.startswith('/role/listAll'):
+                return None
+                
+            # 如果所有检查都通过，允许访问
             return None
             
         except Exception as e:
@@ -165,15 +251,6 @@ class PermissionMiddleware(MiddlewareMixin):
                 return 'system:role:remove'
             if 'grantMenu' in path:
                 return 'system:role:edit'
-        
-        # 菜单管理相关权限
-        # if path.startswith('/menu/'):
-        #     if 'save' in path:
-        #         return 'system:menu:edit'
-        #     if 'search' in path:
-        #         return 'system:menu:list'
-        #     if 'action' in path and method == 'DELETE':
-        #         return 'system:menu:remove'
             
         # 如果没有找到匹配的权限，返回None表示不需要特殊权限
         return None

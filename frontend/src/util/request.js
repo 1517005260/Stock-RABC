@@ -28,49 +28,35 @@ httpService.interceptors.request.use(function (config) {
 });
 
 // 添加响应拦截器
-httpService.interceptors.response.use(function (response) {
-    // 对响应数据做点什么
-    // 检查业务逻辑错误
-    if (response.data && response.data.code !== 200) {
-      // 可以根据不同的错误码做不同处理
-      if (response.data.code === 401) {
-        ElMessage.error('登录已过期，请重新登录')
-        sessionStorage.clear()
-        router.replace('/login')
-      } else {
-        ElMessage.error(response.data.msg || response.data.info || '操作失败')
-      }
+httpService.interceptors.response.use(
+    response => {
+        // 检查是否需要重定向到403页面
+        if (response.status === 403 && response.headers['x-error-page'] === '/403') {
+            router.push('/403')
+            return Promise.reject(new Error(response.data.message || '权限不足'))
+        }
+        return response
+    },
+    error => {
+        if (error.response) {
+            // 检查是否需要重定向到403页面
+            if (error.response.status === 403 && error.response.headers['x-error-page'] === '/403') {
+                router.push('/403')
+                return Promise.reject(new Error(error.response.data.message || '权限不足'))
+            }
+            
+            // 处理其他错误
+            if (error.response.status === 401) {
+                // token过期或无效
+                sessionStorage.removeItem('token')
+                sessionStorage.removeItem('currentUser')
+                router.push('/login')
+            }
+            return Promise.reject(error)
+        }
+        return Promise.reject(error)
     }
-    return response;
-}, function (error) {
-    // 对响应错误做点什么
-    if (error.response) {
-      // 处理不同状态码
-      switch (error.response.status) {
-        case 401:
-          ElMessage.error('您的登录已过期，请重新登录')
-          sessionStorage.clear()
-          router.replace('/login')
-          break
-        case 403:
-          ElMessage.error('您没有权限进行此操作')
-          break
-        case 404:
-          ElMessage.error('请求的资源不存在')
-          break
-        case 500:
-          ElMessage.error('服务器错误，请联系管理员')
-          break
-        default:
-          ElMessage.error(`请求失败(${error.response.status})`)
-      }
-    } else if (error.request) {
-      ElMessage.error('服务器无响应，请检查网络连接')
-    } else {
-      ElMessage.error('请求发送失败')
-    }
-    return Promise.reject(error);
-});
+)
 
 /*网络请求部分*/
 

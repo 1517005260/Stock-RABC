@@ -8,8 +8,7 @@
       >
         <template #extra>
           <div class="actions">
-            <el-button type="primary" @click="goBack">返回上一页</el-button>
-            <el-button @click="goHome">返回首页</el-button>
+            <el-button type="primary" @click="goHome">返回首页</el-button>
           </div>
         </template>
       </el-result>
@@ -21,10 +20,6 @@
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
-
-const goBack = () => {
-  router.go(-1)
-}
 
 const goHome = () => {
   router.push('/')
@@ -54,6 +49,5 @@ const goHome = () => {
   margin-top: 20px;
   display: flex;
   justify-content: center;
-  gap: 20px;
 }
 </style> 

@@ -4,6 +4,11 @@ from rest_framework import serializers
 from user.models import SysUser
 
 
+# Role type constants
+ROLE_SUPERADMIN = 'superadmin'  # 超级管理员
+ROLE_ADMIN = 'admin'            # 管理员
+ROLE_USER = 'user'              # 普通用户
+
 class SysRole(models.Model):
     id = models.AutoField(primary_key=True)
     name = models.CharField(max_length=30, null=True, verbose_name="角色名称")

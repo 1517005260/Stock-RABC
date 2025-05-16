@@ -8,7 +8,7 @@ from rest_framework.views import APIView
 from django.db import connections
 
 # from menu.models import SysRoleMenu
-from role.models import SysRole, SysRoleSerializer, SysUserRole
+from role.models import SysRole, SysRoleSerializer, SysUserRole, ROLE_SUPERADMIN, ROLE_ADMIN
 
 
 # 查询所有角色信息
@@ -60,6 +60,43 @@ class SaveView(APIView):
 
     def post(self, request):
         data = json.loads(request.body.decode("utf-8"))
+        # 获取当前登录用户信息
+        user_id = getattr(request, 'user_id', None)
+        
+        # 检查用户权限
+        if user_id:
+            # 查询用户角色
+            user_roles = SysRole.objects.raw(
+                "SELECT id, code, name FROM sys_role WHERE id IN "
+                "(SELECT role_id FROM sys_user_role WHERE user_id=%s)", 
+                [user_id]
+            )
+            
+            # 检查用户角色
+            is_superadmin = False
+            is_admin = False
+            
+            for role in user_roles:
+                if role.code == ROLE_SUPERADMIN or role.name == '超级管理员':
+                    is_superadmin = True
+                    break
+                if role.code == ROLE_ADMIN or role.name == '管理员':
+                    is_admin = True
+                    
+            # 只有超级管理员可以管理角色
+            if not is_superadmin:
+                return JsonResponse({
+                    'code': 403, 
+                    'message': '权限不足，只有超级管理员可以管理角色'
+                }, status=403)
+                
+            # 只有超级管理员可以创建或修改超级管理员角色
+            if not is_superadmin and data.get('code') == ROLE_SUPERADMIN:
+                return JsonResponse({
+                    'code': 403,
+                    'message': '权限不足，只有超级管理员可以管理超级管理员角色'
+                }, status=403)
+                
         if data['id'] == -1:  # 添加
             obj_sysRole = SysRole(name=data['name'], code=data['code'], remark=data['remark'])
             obj_sysRole.create_time = datetime.now().date()  # Store as date, not datetime
@@ -77,26 +114,36 @@ class ActionView(APIView):
 
     def get(self, request):
         """
-        根据id获取角色信息
+        获取角色信息
         :param request:
         :return:
         """
-        role_id = request.GET.get('id')
-        
-        # Use raw SQL to avoid datetime conversion issues
-        with connections['db_user'].cursor() as cursor:
-            cursor.execute(
-                """SELECT id, name, code, remark, 
-                   CASE WHEN create_time IS NOT NULL THEN date(create_time) ELSE NULL END as create_time,
-                   CASE WHEN update_time IS NOT NULL THEN date(update_time) ELSE NULL END as update_time
-                   FROM sys_role 
-                   WHERE id = %s""",
-                [role_id]
-            )
-            columns = [col[0] for col in cursor.description]
-            role_data = dict(zip(columns, cursor.fetchone()))
+        # 获取当前登录用户信息
+        user_id = getattr(request, 'user_id', None)
+        if not user_id:
+            return JsonResponse({'code': 401, 'message': '未授权'}, status=401)
             
-        return JsonResponse({'code': 200, 'role': role_data})
+        # 查询用户角色
+        user_roles = SysRole.objects.raw(
+            "SELECT id, code, name FROM sys_role WHERE id IN "
+            "(SELECT role_id FROM sys_user_role WHERE user_id=%s)", 
+            [user_id]
+        )
+        
+        # 检查是否为超级管理员
+        is_superadmin = False
+        for role in user_roles:
+            if role.code == ROLE_SUPERADMIN or role.name == '超级管理员':
+                is_superadmin = True
+                break
+                
+        # 非超级管理员只能查看角色列表
+        if not is_superadmin:
+            return JsonResponse({'code': 403, 'message': '权限不足，只有超级管理员可以查看角色详情'}, status=403)
+            
+        id = request.GET.get("id")
+        role_object = SysRole.objects.get(id=id)
+        return JsonResponse({'code': 200, 'role': SysRoleSerializer(role_object).data})
 
     def delete(self, request):
         """
@@ -104,8 +151,30 @@ class ActionView(APIView):
         :param request:
         :return:
         """
-        idList = json.loads(request.body.decode('utf-8'))
+        # 获取当前登录用户信息
+        user_id = getattr(request, 'user_id', None)
+        if not user_id:
+            return JsonResponse({'code': 401, 'message': '未授权'}, status=401)
+            
+        # 查询用户角色
+        user_roles = SysRole.objects.raw(
+            "SELECT id, code, name FROM sys_role WHERE id IN "
+            "(SELECT role_id FROM sys_user_role WHERE user_id=%s)", 
+            [user_id]
+        )
+        
+        # 检查是否为超级管理员
+        is_superadmin = False
+        for role in user_roles:
+            if role.code == ROLE_SUPERADMIN or role.name == '超级管理员':
+                is_superadmin = True
+                break
+                
+        # 只有超级管理员可以删除角色
+        if not is_superadmin:
+            return JsonResponse({'code': 403, 'message': '权限不足，只有超级管理员可以删除角色'}, status=403)
+            
+        idList = json.loads(request.body.decode("utf-8"))
         SysUserRole.objects.filter(role_id__in=idList).delete()
-        # SysRoleMenu.objects.filter(role_id__in=idList).delete()
         SysRole.objects.filter(id__in=idList).delete()
         return JsonResponse({'code': 200})

@@ -76,6 +76,8 @@ router.beforeEach((to, from, next) => {
   }
   
   const token = sessionStorage.getItem('token')
+  const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}')
+  const userRoles = currentUser.roles || ''
   
   // 如果是前往登录页面
   if (to.path === '/login') {
@@ -96,6 +98,24 @@ router.beforeEach((to, from, next) => {
     return
   }
   
+  // 检查系统管理相关路由的权限
+  if (to.path.startsWith('/sys')) {
+    // 检查是否为管理员或超级管理员
+    const isAdmin = userRoles.includes('超级管理员') || userRoles.includes('管理员')
+    if (!isAdmin) {
+      ElMessage.error('权限不足，无法访问')
+      next('/403')
+      return
+    }
+    
+    // 检查角色管理页面的权限
+    if (to.path === '/sys/role' && !userRoles.includes('超级管理员')) {
+      ElMessage.error('权限不足，只有超级管理员可以访问角色管理')
+      next('/403')
+      return
+    }
+  }
+  
   // 检查路由是否需要特定权限
   if (to.meta.permissions && to.meta.permissions.length > 0) {
     const hasPermission = to.meta.permissions.some(permission => 
@@ -104,7 +124,7 @@ router.beforeEach((to, from, next) => {
     
     if (!hasPermission) {
       ElMessage.error('权限不足，无法访问')
-      next('/403') // 跳转到403页面
+      next('/403')
       return
     }
   }

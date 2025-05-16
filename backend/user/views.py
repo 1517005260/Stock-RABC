@@ -10,7 +10,7 @@ from rest_framework_jwt.settings import api_settings
 
 from app import settings
 # from menu.models import SysMenu, SysMenuSerializer
-from role.models import SysRole, SysUserRole
+from role.models import SysRole, SysUserRole, ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_USER
 from user.models import SysUser, SysUserSerializer
 
 
@@ -23,8 +23,8 @@ class LoginView(APIView):
         try:
             user = SysUser.objects.get(username=username, password=password)
             
-            # 检查用户状态，只允许正常状态（status=1）的用户登录
-            if user.status == 0:
+            # 检查用户状态，只允许正常状态（status=0）的用户登录
+            if user.status == 0:  # status=0 表示禁用，status=1 表示正常
                 return JsonResponse({'code': 403, 'info': '账号已被禁用，请联系管理员！'})
                 
             jwt_payload_handler = api_settings.JWT_PAYLOAD_HANDLER
@@ -41,6 +41,7 @@ class LoginView(APIView):
 
             # 获取当前用户所有的角色，逗号隔开
             roles = ",".join([role.name for role in roleList])
+            role_codes = [role.code for role in roleList]
             
             # 将用户数据序列化
             user_data = SysUserSerializer(user).data
@@ -49,26 +50,39 @@ class LoginView(APIView):
             
             # 添加权限信息
             permissions = []
-            is_admin = False
             
-            # 检查是否是管理员角色
-            for role in roleList:
-                if role.code == 'admin' or role.name == '管理员':
-                    is_admin = True
-                    break
+            # 确定用户角色类型和对应的权限
+            is_superadmin = ROLE_SUPERADMIN in role_codes or '超级管理员' in [role.name for role in roleList]
+            is_admin = ROLE_ADMIN in role_codes or '管理员' in [role.name for role in roleList]
             
-            # 如果是管理员，添加所有权限
-            if is_admin:
-                # 这里添加所有系统权限标识符
+            # 1. 超级管理员拥有所有权限
+            if is_superadmin:
                 permissions = [
-                    'system:user:list', 'system:user:edit', 'system:user:remove', 'system:user:reset',
-                    'system:role:list', 'system:role:edit', 'system:role:remove',
-                    'system:menu:list', 'system:menu:edit', 'system:menu:remove'
+                    # 用户管理权限
+                    'system:user:list', 'system:user:edit', 'system:user:add', 'system:user:remove', 'system:user:reset',
+                    # 角色管理权限
+                    'system:role:list', 'system:role:edit', 'system:role:add', 'system:role:remove',
+                    # 个人管理权限
+                    'system:user:profile'
                 ]
+            # 2. 管理员有角色管理权限
+            elif is_admin:
+                permissions = [
+                    # 用户管理权限（不包括删除用户）
+                    'system:user:list', 'system:user:edit', 'system:user:add', 'system:user:reset',
+                    # 角色查看权限（只读）
+                    'system:role:list',
+                    # 个人管理权限
+                    'system:user:profile'
+                ]
+            # 3. 普通用户只有查看权限
             else:
-                # 这里应该基于角色获取实际权限
-                # 临时允许基本权限，后续可以完善
-                permissions = ['system:user:list', 'system:role:list']
+                permissions = [
+                    # 只读权限
+                    'system:user:list', 'system:role:list',
+                    # 个人管理权限
+                    'system:user:profile'
+                ]
 
             return JsonResponse({
                 'code': 200, 
@@ -121,6 +135,35 @@ class SaveView(APIView):
     def post(self, request):
         data = json.loads(request.body.decode("utf-8"))
         print(data)
+        # 获取当前登录用户信息
+        user_id = getattr(request, 'user_id', None)
+        
+        # 检查是否是用户自己的操作
+        is_self_operation = user_id and data.get('id') == user_id
+        
+        # 查询用户角色
+        user_roles = SysRole.objects.raw(
+            "SELECT id, code, name FROM sys_role WHERE id IN "
+            "(SELECT role_id FROM sys_user_role WHERE user_id=%s)", 
+            [user_id]
+        )
+        
+        # 检查是否为超级管理员
+        is_superadmin = False
+        for role in user_roles:
+            if role.code == ROLE_SUPERADMIN or role.name == '超级管理员':
+                is_superadmin = True
+                break
+        
+        # 权限检查
+        if not is_self_operation and not is_superadmin:
+            # 非超级管理员不能修改他人信息
+            if data.get('id') != -1:
+                return JsonResponse({'code': 403, 'message': '权限不足，只能修改自己的个人信息'}, status=403)
+            # 非超级管理员不能添加用户
+            else:
+                return JsonResponse({'code': 403, 'message': '权限不足，只有超级管理员可以添加用户'}, status=403)
+        
         if data['id'] == -1:  # 添加
             obj_sysUser = SysUser(username=data['username'], password=data['password'], email=data['email'],
                                   phonenumber=data['phonenumber'], status=data['status'], remark=data['remark'])
@@ -130,25 +173,44 @@ class SaveView(APIView):
 
             obj_sysUser.save()
         else:  # 修改
-            obj_sysUser = SysUser(id=data['id'], username=data['username'], password=data['password'],
-                                  avatar=data['avatar'], email=data['email'], phonenumber=data['phonenumber'],
-                                  login_date=data['login_date'], status=data['status'], create_time=data['create_time'],
-                                  update_time=data['update_time'], remark=data['remark'])
-            obj_sysUser.update_time = datetime.now()
+            # 如果是自己修改信息，不允许修改状态和创建时间等敏感字段
+            if is_self_operation:
+                # 获取原始用户信息
+                original_user = SysUser.objects.get(id=data['id'])
+                
+                # 保持原始数据不变的字段
+                obj_sysUser = SysUser(
+                    id=data['id'], 
+                    username=data['username'], 
+                    password=original_user.password,  # 保持密码不变
+                    avatar=data.get('avatar', original_user.avatar),  # 使用新的头像或保持原头像
+                    email=data['email'], 
+                    phonenumber=data['phonenumber'],
+                    login_date=original_user.login_date, 
+                    status=original_user.status,  # 保持状态不变
+                    create_time=original_user.create_time,
+                    update_time=datetime.now(), 
+                    remark=data.get('remark', original_user.remark)  # 使用新的备注或保持原备注
+                )
+            else:
+                # 超级管理员可以修改所有字段
+                obj_sysUser = SysUser(id=data['id'], username=data['username'], password=data['password'],
+                                      avatar=data['avatar'], email=data['email'], phonenumber=data['phonenumber'],
+                                      login_date=data['login_date'], status=data['status'], create_time=data['create_time'],
+                                      update_time=datetime.now(), remark=data['remark'])
+            
             obj_sysUser.save()
             
-            # 获取用户角色信息，添加到响应中
-            user_data = SysUserSerializer(obj_sysUser).data
-            try:
-                roleList = SysRole.objects.raw("select id, name from sys_role where id in (select role_id from "
-                                              "sys_user_role where user_id=" + str(data['id']) + ")")
-                roles = ",".join([role.name for role in roleList])
-                user_data['roles'] = roles
-                return JsonResponse({'code': 200, 'user': user_data})
-            except Exception as e:
-                print(f"获取用户角色失败: {e}")
+            # 如果是修改自己的信息，返回更新后的用户数据
+            if is_self_operation:
+                return JsonResponse({
+                    'code': 200,
+                    'message': '个人信息修改成功',
+                    'user': SysUserSerializer(obj_sysUser).data
+                })
+            else:
+                return JsonResponse({'code': 200, 'message': '用户信息修改成功'})
 
-        return JsonResponse({'code': 200})
 
 class ActionView(APIView):
     def get(self, request):
@@ -324,30 +386,44 @@ class CurrentUserView(APIView):
             
             # 获取当前用户所有的角色，逗号隔开
             roles = ",".join([role.name for role in roleList])
+            role_codes = [role.code for role in roleList]
             user_data['roles'] = roles
             
             # 添加权限信息
             permissions = []
-            is_admin = False
             
-            # 检查是否是管理员角色
-            for role in roleList:
-                if role.code == 'admin' or role.name == '管理员':
-                    is_admin = True
-                    break
+            # 确定用户角色类型和对应的权限
+            is_superadmin = ROLE_SUPERADMIN in role_codes or '超级管理员' in [role.name for role in roleList]
+            is_admin = ROLE_ADMIN in role_codes or '管理员' in [role.name for role in roleList]
             
-            # 如果是管理员，添加所有权限
-            if is_admin:
-                # 这里添加所有系统权限标识符
+            # 1. 超级管理员拥有所有权限
+            if is_superadmin:
                 permissions = [
-                    'system:user:list', 'system:user:edit', 'system:user:remove', 'system:user:reset',
-                    'system:role:list', 'system:role:edit', 'system:role:remove',
-                    'system:menu:list', 'system:menu:edit', 'system:menu:remove'
+                    # 用户管理权限
+                    'system:user:list', 'system:user:edit', 'system:user:add', 'system:user:remove', 'system:user:reset',
+                    # 角色管理权限
+                    'system:role:list', 'system:role:edit', 'system:role:add', 'system:role:remove',
+                    # 个人管理权限
+                    'system:user:profile'
                 ]
+            # 2. 管理员有角色管理权限
+            elif is_admin:
+                permissions = [
+                    # 用户管理权限（不包括删除用户）
+                    'system:user:list', 'system:user:edit', 'system:user:add', 'system:user:reset',
+                    # 角色查看权限（只读）
+                    'system:role:list',
+                    # 个人管理权限
+                    'system:user:profile'
+                ]
+            # 3. 普通用户只有查看权限
             else:
-                # 这里应该基于角色获取实际权限
-                # 临时允许基本权限，后续可以完善
-                permissions = ['system:user:list', 'system:role:list']
+                permissions = [
+                    # 只读权限
+                    'system:user:list', 'system:role:list',
+                    # 个人管理权限
+                    'system:user:profile'
+                ]
             
             user_data['permissions'] = permissions
             

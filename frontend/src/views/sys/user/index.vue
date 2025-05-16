@@ -5,8 +5,17 @@
         <el-input placeholder="请输入用户名..." v-model="queryForm.query" clearable></el-input>
       </el-col>
       <el-button type="primary" :icon="Search" @click="initUserList">搜索</el-button>
-      <el-button type="success" :icon="DocumentAdd" @click="handleDialogValue()">新增</el-button>
-      <el-popconfirm title="您确定批量删除这些记录吗？" @confirm="handleDelete(null)">
+      <el-button 
+        type="success" 
+        :icon="DocumentAdd" 
+        @click="handleDialogValue()"
+        v-permission="'system:user:add'"
+      >新增</el-button>
+      <el-popconfirm 
+        title="您确定批量删除这些记录吗？" 
+        @confirm="handleDelete(null)"
+        v-permission="'system:user:remove'"
+      >
         <template #reference>
           <el-button type="danger" :disabled="delBtnStatus" :icon="Delete">批量删除</el-button>
         </template>
@@ -54,8 +63,8 @@
             @change="statusChangeHandle(row)" 
             active-text="正常" 
             inactive-text="禁用"
-            :active-value="1" 
-            :inactive-value="0"
+            :active-value="0" 
+            :inactive-value="1"
           >
           </el-switch>
         </template>
@@ -69,25 +78,21 @@
             type="primary" 
             :icon="Tools" 
             @click="handleRoleDialogValue(scope.row.id, scope.row.roleList || [])"
-            >分配角色
-          </el-button>
+            v-permission="'system:user:edit'"
+          >分配角色</el-button>
           <el-button-group>
             <el-button 
               type="primary" 
               size="small" 
               @click="handlePwd(scope.row.id)"
               v-permission="'system:user:reset'"
-            >
-              重置密码
-            </el-button>
+            >重置密码</el-button>
             <el-button 
               type="danger" 
               size="small" 
               @click="handleSelectionRemove([scope.row.id])"
               v-permission="'system:user:remove'"
-            >
-              删除
-            </el-button>
+            >删除</el-button>
           </el-button-group>
         </template>
       </el-table-column>

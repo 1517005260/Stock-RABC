@@ -28,10 +28,23 @@ export default createStore({
       const permissions = getters.getPermissions
       const userRoles = getters.getCurrentUser.roles || ''
       
-      if (userRoles.includes('管理员')) {
+      // 超级管理员拥有所有权限
+      if (userRoles.includes('超级管理员')) {
         return true
       }
       
+      // 管理员拥有用户管理相关权限和角色列表查看权限
+      if (userRoles.includes('管理员')) {
+        if (permission.startsWith('system:user:') || permission === 'system:role:list') {
+          // 管理员不能删除用户
+          if (permission === 'system:user:remove') {
+            return false
+          }
+          return true
+        }
+      }
+      
+      // 检查用户的具体权限
       return permissions.includes(permission)
     }
   },

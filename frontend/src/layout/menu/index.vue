@@ -13,20 +13,20 @@
       </el-icon>
       <span>首页</span>
     </el-menu-item>
-    <el-sub-menu index="/sys">
+    <el-sub-menu index="/sys" v-if="hasAdminPermission">
       <template #title>
         <el-icon>
           <svg-icon icon="system"/>
         </el-icon>
         <span>系统管理</span>
       </template>
-      <el-menu-item index="/sys/user" @click="openTab({name:'用户管理', path:'/sys/user'})">
+      <el-menu-item index="/sys/user" @click="openTab({name:'用户管理', path:'/sys/user'})" v-if="hasUserPermission">
         <el-icon>
           <svg-icon icon="user"/>
         </el-icon>
         <span>用户管理</span>
       </el-menu-item>
-      <el-menu-item index="/sys/role" @click="openTab({name:'角色管理', path:'/sys/role'})">
+      <el-menu-item index="/sys/role" @click="openTab({name:'角色管理', path:'/sys/role'})" v-if="hasRolePermission">
         <el-icon>
           <svg-icon icon="peoples"/>
         </el-icon>
@@ -50,6 +50,22 @@ import { HomeFilled } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const defaultActive = computed(() => route.path)
+
+// 检查用户权限
+const hasAdminPermission = computed(() => {
+  const userRoles = store.getters.getCurrentUser.roles || ''
+  return userRoles.includes('超级管理员') || userRoles.includes('管理员')
+})
+
+const hasUserPermission = computed(() => {
+  const userRoles = store.getters.getCurrentUser.roles || ''
+  return userRoles.includes('超级管理员') || userRoles.includes('管理员')
+})
+
+const hasRolePermission = computed(() => {
+  const userRoles = store.getters.getCurrentUser.roles || ''
+  return userRoles.includes('超级管理员')
+})
 
 const openTab = (item) => {
   if (item && item.path) {
