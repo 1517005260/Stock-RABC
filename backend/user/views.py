@@ -436,3 +436,70 @@ class CurrentUserView(APIView):
         except Exception as e:
             print(f"获取当前用户信息失败: {e}")
             return JsonResponse({'code': 500, 'msg': '获取用户信息失败'})
+
+
+class RegisterView(APIView):
+    def post(self, request):
+        data = json.loads(request.body.decode("utf-8"))
+        username = data.get('username')
+        password = data.get('password')
+        confirm_password = data.get('confirmPassword')
+        email = data.get('email', '')  # 邮箱可选，默认为空字符串
+        
+        # 验证用户名是否已存在
+        if SysUser.objects.filter(username=username).exists():
+            return JsonResponse({'code': 500, 'info': '用户名已存在'})
+            
+        # 验证两次密码是否一致
+        if password != confirm_password:
+            return JsonResponse({'code': 500, 'info': '两次输入的密码不一致'})
+            
+        try:
+            # 创建新用户
+            user = SysUser(
+                username=username,
+                password=password,
+                email=email,
+                status=1,  # 1表示正常状态
+                create_time=datetime.now(),
+                avatar='default.jpg'
+            )
+            user.save()
+            
+            # 为新用户分配普通用户角色
+            role = SysRole.objects.get(code='user')  # 获取普通用户角色
+            user_role = SysUserRole(user_id=user.id, role_id=role.id)
+            user_role.save()
+            
+            # 注册成功后直接登录
+            jwt_payload_handler = api_settings.JWT_PAYLOAD_HANDLER
+            jwt_encode_handler = api_settings.JWT_ENCODE_HANDLER
+            payload = jwt_payload_handler(user)
+            token = jwt_encode_handler(payload)
+            
+            # 获取用户角色（新注册用户默认为普通用户）
+            roleList = SysRole.objects.raw("select id, name, code from sys_role where code = 'user'")
+            roles = ",".join([role.name for role in roleList])
+            
+            # 序列化用户数据
+            user_data = SysUserSerializer(user).data
+            user_data['roles'] = roles
+            
+            # 设置默认权限
+            permissions = [
+                'system:user:list',
+                'system:role:list',
+                'system:user:profile'
+            ]
+            
+            return JsonResponse({
+                'code': 200,
+                'info': '注册成功',
+                'token': token,
+                'user': user_data,
+                'permissions': permissions
+            })
+            
+        except Exception as e:
+            print(e)
+            return JsonResponse({'code': 500, 'info': '注册失败，请稍后重试'})

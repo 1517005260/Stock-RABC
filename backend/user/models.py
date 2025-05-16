@@ -22,6 +22,10 @@ class SysUser(models.Model):
 
 
 class SysUserSerializer(serializers.ModelSerializer):
+    create_time = serializers.DateTimeField(format="%Y-%m-%d %H:%M:%S", required=False)
+    update_time = serializers.DateTimeField(format="%Y-%m-%d %H:%M:%S", required=False)
+    login_date = serializers.DateTimeField(format="%Y-%m-%d %H:%M:%S", required=False)
+
     class Meta:
         model = SysUser
         fields = '__all__'

@@ -84,7 +84,7 @@ onMounted(() => {
                   </li>
                   <li class="list-group-item">
                     <svg-icon icon="date"/>&nbsp;&nbsp;创建日期
-                    <div class="pull-right">{{ currentUser.login_date || '未知' }}</div>
+                    <div class="pull-right">{{ currentUser.create_time || '未知' }}</div>
                   </li>
                 </ul>
               </div>

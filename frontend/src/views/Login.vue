@@ -38,6 +38,9 @@
           <span>登 录</span>
         </el-button>
       </el-form-item>
+      <div class="register-link">
+        还没有账号？<router-link to="/register">立即注册</router-link>
+      </div>
     </el-form>
   </div>
 </template>
@@ -164,7 +167,7 @@ a {
   display: flex;
   justify-content: center;
   align-items: center;
-  height: 100%;
+  height: 100vh;
   background-image: url("../assets/images/login-background.jpg");
   background-size: cover;
 }
@@ -230,5 +233,21 @@ a {
 .login-code-img {
   height: 40px;
   padding-left: 12px;
+}
+
+.register-link {
+  text-align: center;
+  margin-top: 20px;
+  font-size: 14px;
+  color: #666;
+}
+
+.register-link a {
+  color: #409EFF;
+  text-decoration: none;
+}
+
+.register-link a:hover {
+  text-decoration: underline;
 }
 </style>

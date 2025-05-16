@@ -74,13 +74,14 @@
       <el-table-column prop="remark" label="备注" min-width="100"/>
       <el-table-column prop="action" label="操作" width="400" fixed="right" align="center">
         <template v-slot="scope">
-          <el-button 
-            type="primary" 
-            :icon="Tools" 
-            @click="handleRoleDialogValue(scope.row.id, scope.row.roleList || [])"
-            v-permission="'system:user:edit'"
-          >分配角色</el-button>
           <el-button-group>
+            <el-button 
+              type="primary" 
+              size="small"
+              :icon="Tools" 
+              @click="handleRoleDialogValue(scope.row.id, scope.row.roleList || [])"
+              v-permission="'system:user:edit'"
+            >分配角色</el-button>
             <el-button 
               type="primary" 
               size="small" 

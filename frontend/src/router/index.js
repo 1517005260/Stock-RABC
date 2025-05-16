@@ -50,6 +50,12 @@ const routes = [
     meta: { title: '登录', requiresAuth: false }
   },
   {
+    path: '/register',
+    name: 'register',
+    component: () => import('../views/Register.vue'),
+    meta: { title: '注册', requiresAuth: false }
+  },
+  {
     path: '/403',
     name: '403',
     component: () => import('../views/403.vue'),
@@ -79,13 +85,13 @@ router.beforeEach((to, from, next) => {
   const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}')
   const userRoles = currentUser.roles || ''
   
-  // 如果是前往登录页面
-  if (to.path === '/login') {
+  // 如果是前往登录页面或注册页面
+  if (to.path === '/login' || to.path === '/register') {
     if (token) {
       // 已登录，跳转到首页
       next('/')
     } else {
-      // 未登录，允许访问登录页
+      // 未登录，允许访问登录页或注册页
       next()
     }
     return

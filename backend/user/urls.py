@@ -5,6 +5,7 @@ from user import views
 
 urlpatterns = [
     path('login', views.LoginView.as_view(), name="login"),  # 登录
+    path('register', views.RegisterView.as_view(), name="register"),  # 注册
     path('save', views.SaveView.as_view(), name="save"),  # 用户添加或修改
     path('updateUserPwd', views.PwdView.as_view(), name="updateUserPwd"),  # 修改密码
     path('uploadImage', views.ImageView.as_view(), name="uploadImage"),  # 头像上传

@@ -12,7 +12,7 @@ from user.models import SysUser
 class JwtAuthenticationMiddleware(MiddlewareMixin):
 
     def process_request(self, request):
-        white_list = ["/user/login"]  # 请求白名单
+        white_list = ["/user/login", "/user/register"]  # 请求白名单
         path = request.path
         if path not in white_list and not path.startswith("/media"):
             print('要进行token验证')
@@ -73,6 +73,7 @@ class PermissionMiddleware(MiddlewareMixin):
         # 白名单，无需权限校验的路径
         white_list = [
             "/user/login", 
+            "/user/register",  # 添加注册接口到白名单
             "/user/current",
             "/user/updateUserPwd",  # 修改自己的密码
             "/user/updateAvatar",   # 修改自己的头像
