@@ -40,11 +40,12 @@ INSTALLED_APPS = [
     'rest_framework_jwt',
     'user.apps.UserConfig',
     'role.apps.RoleConfig',
+    'chat.apps.ChatConfig',
     # 'menu.apps.MenuConfig',
 ]
 
 MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',
+    'corsheaders.middleware.CorsMiddleware',  # CORS中间件必须放在最前面
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -55,16 +56,40 @@ MIDDLEWARE = [
     'user.middleware.PermissionMiddleware'
 ]
 
-CORS_ORIGIN_ALLOW_ALL = True
+# CORS配置
+CORS_ORIGIN_ALLOW_ALL = True  # 允许所有域名跨域访问
+CORS_ALLOW_CREDENTIALS = True  # 允许携带凭证
 
-CORS_ALLOW_CREDENTIALS = True
-
+# 允许的请求方法
 CORS_ALLOW_METHODS = [
     'GET',
     'POST',
     'PUT',
     'PATCH',
     'DELETE',
+    'OPTIONS',
+]
+
+# 允许的请求头
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+    'x-token',
+    'cache-control',
+]
+
+# 允许的响应头
+CORS_EXPOSE_HEADERS = [
+    'access-control-allow-origin',
+    'access-control-allow-credentials',
+    'cache-control',
 ]
 
 ROOT_URLCONF = 'app.urls'
@@ -106,6 +131,7 @@ DATABASE_ROUTERS = ['utils.router.DatabaseAppsRouter']
 DATABASE_APPS_MAPPING = {
     'user': 'db_user',
     'role': 'db_user',
+    'chat': 'db_user', 
     # 'menu': 'db_user',
 }
 
@@ -150,3 +176,6 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 MEDIA_ROOT = BASE_DIR / 'media'
 MEDIA_URL = 'media/'
+
+# 异步配置
+ASGI_APPLICATION = 'app.asgi.application'

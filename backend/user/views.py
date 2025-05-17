@@ -63,7 +63,9 @@ class LoginView(APIView):
                     # 角色管理权限
                     'system:role:list', 'system:role:edit', 'system:role:add', 'system:role:remove',
                     # 个人管理权限
-                    'system:user:profile'
+                    'system:user:profile',
+                    # 聊天权限
+                    'system:chat:use',
                 ]
             # 2. 管理员有角色管理权限
             elif is_admin:
@@ -73,7 +75,9 @@ class LoginView(APIView):
                     # 角色查看权限（只读）
                     'system:role:list',
                     # 个人管理权限
-                    'system:user:profile'
+                    'system:user:profile',
+                    # 聊天权限
+                    'system:chat:use',
                 ]
             # 3. 普通用户只有查看权限
             else:
@@ -81,7 +85,9 @@ class LoginView(APIView):
                     # 只读权限
                     'system:user:list', 'system:role:list',
                     # 个人管理权限
-                    'system:user:profile'
+                    'system:user:profile',
+                    # 聊天权限
+                    'system:chat:use',
                 ]
 
             return JsonResponse({
@@ -404,7 +410,9 @@ class CurrentUserView(APIView):
                     # 角色管理权限
                     'system:role:list', 'system:role:edit', 'system:role:add', 'system:role:remove',
                     # 个人管理权限
-                    'system:user:profile'
+                    'system:user:profile',
+                    # 聊天权限
+                    'system:chat:use',
                 ]
             # 2. 管理员有角色管理权限
             elif is_admin:
@@ -414,7 +422,9 @@ class CurrentUserView(APIView):
                     # 角色查看权限（只读）
                     'system:role:list',
                     # 个人管理权限
-                    'system:user:profile'
+                    'system:user:profile',
+                    # 聊天权限
+                    'system:chat:use',
                 ]
             # 3. 普通用户只有查看权限
             else:
@@ -422,7 +432,9 @@ class CurrentUserView(APIView):
                     # 只读权限
                     'system:user:list', 'system:role:list',
                     # 个人管理权限
-                    'system:user:profile'
+                    'system:user:profile',
+                    # 聊天权限
+                    'system:chat:use',
                 ]
             
             user_data['permissions'] = permissions

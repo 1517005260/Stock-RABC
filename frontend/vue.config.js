@@ -5,6 +5,19 @@ function resolve(dir) {
 }
 module.exports = {
   lintOnSave: false,
+  // 开发服务器配置
+  devServer: {
+    proxy: {
+      // 配置跨域
+      '/api': {
+        target: 'http://localhost:8000/',
+        changeOrigin: true, // 允许跨域
+        pathRewrite: {
+          '^/api': '' // 重写路径，将 /api 替换为空
+        }
+      }
+    }
+  },
   chainWebpack(config) {
 // 设置 svg-sprite-loader
 // config 为 webpack 配置对象

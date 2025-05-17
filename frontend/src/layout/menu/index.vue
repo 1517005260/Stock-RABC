@@ -13,6 +13,12 @@
       </el-icon>
       <span>首页</span>
     </el-menu-item>
+    <el-menu-item index="/chat" @click="openTab({name:'AI聊天', path:'/chat'})">
+      <el-icon>
+        <chat-dot-round />
+      </el-icon>
+      <span>AI聊天助手</span>
+    </el-menu-item>
     <el-sub-menu index="/sys" v-if="hasAdminPermission">
       <template #title>
         <el-icon>
@@ -46,7 +52,7 @@
 import { computed } from 'vue'
 import store from "@/store";
 import { useRoute } from 'vue-router'
-import { HomeFilled } from '@element-plus/icons-vue'
+import { HomeFilled, ChatDotRound } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const defaultActive = computed(() => route.path)

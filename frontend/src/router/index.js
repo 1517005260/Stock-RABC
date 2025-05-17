@@ -40,6 +40,12 @@ const routes = [
         name: '个人中心',
         component: () => import('../views/userCenter/index.vue'),
         meta: { title: '个人中心', requiresAuth: true }
+      },
+      {
+        path: '/chat',
+        name: 'AI聊天',
+        component: () => import('../views/chat/index.vue'),
+        meta: { title: 'AI聊天', requiresAuth: true }
       }
     ]
   },

@@ -16,12 +16,20 @@ class JwtAuthenticationMiddleware(MiddlewareMixin):
         path = request.path
         if path not in white_list and not path.startswith("/media"):
             print('要进行token验证')
-            # Check both header formats (Authorization header or direct token)
-            token = request.META.get('HTTP_AUTHORIZATION')
-            if not token and 'HTTP_X_TOKEN' in request.META:
+            # 检查多种获取token的方式
+            token = None
+            
+            # 1. 从Authorization或X-Token头中获取
+            if 'HTTP_AUTHORIZATION' in request.META:
+                token = request.META.get('HTTP_AUTHORIZATION')
+            elif 'HTTP_X_TOKEN' in request.META:
                 token = request.META.get('HTTP_X_TOKEN')
+            
+            # 2. 从URL参数中获取token（用于SSE连接）
+            if not token and 'token' in request.GET:
+                token = request.GET.get('token')
                 
-            # Handle the case when token is passed directly in the body
+            # 3. 从请求体中获取token
             if not token and request.body:
                 try:
                     body_data = json.loads(request.body)
@@ -33,10 +41,11 @@ class JwtAuthenticationMiddleware(MiddlewareMixin):
             print("token:", token)
             
             if not token:
+                print(f"Unauthorized: {path}")
                 return JsonResponse({'code': 401, 'message': '未提供Token'}, status=401)
                 
-            # Strip 'Bearer ' prefix if present
-            if token.startswith('Bearer '):
+            # 如果token以Bearer开头，移除前缀
+            if isinstance(token, str) and token.startswith('Bearer '):
                 token = token[7:]
 
             try:
@@ -73,15 +82,21 @@ class PermissionMiddleware(MiddlewareMixin):
         # 白名单，无需权限校验的路径
         white_list = [
             "/user/login", 
-            "/user/register",  # 添加注册接口到白名单
+            "/user/register",  # 注册接口
             "/user/current",
             "/user/updateUserPwd",  # 修改自己的密码
             "/user/updateAvatar",   # 修改自己的头像
             "/user/uploadImage",    # 上传图片
             "/user/save",          # 修改个人信息
+            "/chat/",              # 聊天API，允许所有用户访问
+            "/chat/stream/",        # 聊天流式API
         ]
         path = request.path
         
+        # 确保流式响应的路径匹配
+        if path.startswith("/chat/stream/"):
+            return None
+            
         # 跳过白名单中的路径和媒体文件
         if path in white_list or path.startswith("/media"):
             return None
@@ -252,6 +267,10 @@ class PermissionMiddleware(MiddlewareMixin):
                 return 'system:role:remove'
             if 'grantMenu' in path:
                 return 'system:role:edit'
+        
+        if path.startswith('/chat/'):
+            # 通用聊天权限
+            return 'system:chat:use'
             
         # 如果没有找到匹配的权限，返回None表示不需要特殊权限
         return None
