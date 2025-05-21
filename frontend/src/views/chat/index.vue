@@ -7,15 +7,13 @@
           <el-tag v-if="usage.is_admin" type="success">管理员账号</el-tag>
           <el-tag v-else type="info">普通账号：今日已用 {{ usage.today_count }}/{{ usage.daily_limit }} 次</el-tag>
         </div>
-        <el-button 
-          type="default" 
-          size="small" 
-          icon="Delete" 
+        <a 
+          class="clear-history-link" 
           @click="clearChatHistory"
-          :disabled="chatHistory.length === 0"
+          :class="{ 'disabled': chatHistory.length === 0 }"
         >
           清除记录
-        </el-button>
+        </a>
       </div>
     </div>
 
@@ -44,7 +42,7 @@
             <el-avatar :size="40" :icon="ChatDotRound" />
           </div>
           <div class="message-content">
-            <p v-html="formatMessage(message.response)"></p>
+            <div class="markdown-content" v-html="renderMarkdown(message.response)"></div>
             <span class="message-time">{{ message.created_time }} · {{ message.model }}</span>
           </div>
         </div>
@@ -66,7 +64,7 @@
             <el-avatar :size="40" :icon="ChatDotRound" />
           </div>
           <div class="message-content">
-            <p v-if="currentResponse" v-html="formatMessage(currentResponse)"></p>
+            <div v-if="currentResponse" class="markdown-content" v-html="renderMarkdown(currentResponse)"></div>
             <p v-else><span class="typing-indicator"></span></p>
             <span class="message-time">正在回复...</span>
           </div>
@@ -129,7 +127,7 @@ export default {
       const avatar = currentUser.avatar || ''
       // 如果avatarUrl是相对路径，添加服务器前缀
       if (avatar && !avatar.startsWith('http')) {
-        return `${request.getServerUrl()}${avatar}`;
+        return `${request.getServerUrl()}media/userAvatar/${avatar}`;
       }
       return avatar || 'https://cube.elemecdn.com/3/7c/3ea6beec64369c2642b92c6726f1epng.png';
     })
@@ -308,17 +306,85 @@ export default {
       }
     }
     
-    // 格式化消息文本（处理换行和代码块）
-    const formatMessage = (text) => {
+    // 使用原生方法渲染Markdown文本
+    const renderMarkdown = (text) => {
       if (!text) return ''
       
-      // 将换行符转换为<br>
-      let formatted = text.replace(/\n/g, '<br>')
+      // 处理列表 - 需要先处理列表再处理其他元素
+      let html = text
+        // 转义HTML，防止XSS攻击
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        
+        // 处理列表项
+        .replace(/^[ \t]*- (.*?)$/gm, '<li>$1</li>')
+        .replace(/^[ \t]*\* (.*?)$/gm, '<li>$1</li>')
+        .replace(/^[ \t]*(\d+)\. (.*?)$/gm, '<li>$2</li>');
       
-      // 简单处理代码块
-      formatted = formatted.replace(/```(.*?)```/gs, '<pre><code>$1</code></pre>')
+      // 将连续的列表项组合成列表
+      let inList = false;
+      let result = '';
+      const lines = html.split('\n');
       
-      return formatted
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].startsWith('<li>')) {
+          if (!inList) {
+            result += '<ul>';
+            inList = true;
+          }
+          result += lines[i];
+        } else {
+          if (inList) {
+            result += '</ul>';
+            inList = false;
+          }
+          result += lines[i] + '\n';
+        }
+      }
+      
+      if (inList) {
+        result += '</ul>';
+      }
+      
+      html = result
+        // 处理代码块
+        .replace(/```([\s\S]*?)```/g, (match, code) => {
+          // 处理代码内容，保留换行，但移除可能的语言标识符
+          const codeLines = code.split('\n');
+          // 如果第一行可能是语言标识，则移除
+          if (codeLines.length > 0 && !codeLines[0].includes('=') && !codeLines[0].includes('(') && !codeLines[0].includes(')')) {
+            codeLines.shift();
+          }
+          // 将代码行重新组合，保留原始格式
+          const formattedCode = codeLines.join('\n').trim()
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+          return `<pre><code class="code-block">${formattedCode}</code></pre>`;
+        })
+        
+        // 处理行内代码
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        
+        // 处理标题
+        .replace(/^### (.*?)$/gm, '<h3>$1</h3>')
+        .replace(/^## (.*?)$/gm, '<h2>$1</h2>')
+        .replace(/^# (.*?)$/gm, '<h1>$1</h1>')
+        
+        // 处理引用块
+        .replace(/^> (.*?)$/gm, '<blockquote>$1</blockquote>')
+        
+        // 处理链接
+        .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank">$1</a>')
+        
+        // 处理粗体和斜体
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.*?)\*/g, '<em>$1</em>')
+        
+        // 处理换行
+        .replace(/\n/g, '<br>');
+      
+      return html;
     }
     
     // 滚动到底部
@@ -402,7 +468,7 @@ export default {
       currentUserAvatar,
       historyCleared,
       sendMessage,
-      formatMessage,
+      renderMarkdown,
       scrollToBottom,
       clearChatHistory,
       ChatDotRound,
@@ -413,7 +479,7 @@ export default {
 }
 </script>
 
-<style scoped>
+<style>
 .chat-container {
   display: flex;
   flex-direction: column;
@@ -523,22 +589,162 @@ export default {
   66% { content: "..."; }
 }
 
-/* 代码块样式 */
-:deep(pre) {
-  background-color: #f5f5f5;
-  padding: 12px;
+/* Markdown内容样式 */
+.markdown-content {
+  padding: 8px 12px;
   border-radius: 4px;
-  overflow-x: auto;
-  margin: 8px 0;
+  white-space: normal;
+  word-break: break-word;
 }
 
-:deep(code) {
-  font-family: Monaco, Menlo, Consolas, 'Courier New', monospace;
+.markdown-content p {
+  margin: 0 0 10px 0;
+  padding: 0;
+  border-radius: 0;
+  line-height: 1.6;
+}
+
+.markdown-content p:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-content h1, 
+.markdown-content h2, 
+.markdown-content h3, 
+.markdown-content h4, 
+.markdown-content h5, 
+.markdown-content h6 {
+  margin-top: 16px;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+.markdown-content ul {
+  padding-left: 20px;
+  margin: 10px 0;
+  line-height: 1.6;
+  list-style-type: disc;
+}
+
+.markdown-content ol {
+  padding-left: 20px;
+  margin: 10px 0;
+  line-height: 1.6;
+  list-style-type: decimal;
+}
+
+.markdown-content li {
+  margin-bottom: 5px;
+}
+
+.markdown-content blockquote {
+  margin: 10px 0;
+  padding: 10px 15px;
+  border-left: 4px solid #dcdfe6;
+  color: #606266;
+  background-color: #f8f8f9;
+}
+
+.markdown-content pre {
+  background-color: #282c34;
+  color: #abb2bf;
+  padding: 12px 16px;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 10px 0;
   font-size: 14px;
+  line-height: 1.5;
+  max-width: 100%;
+  position: relative;
+}
+
+.markdown-content code {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+  font-size: 14px;
+  background-color: rgba(100, 100, 100, 0.1);
+  padding: 2px 4px;
+  border-radius: 3px;
+  color: #e83e8c;
+}
+
+.markdown-content pre code {
+  background-color: transparent;
+  padding: 0;
+  color: #e6e6e6;
+  border-radius: 0;
+  display: block;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-wrap: normal;
+}
+
+.markdown-content .code-block {
+  color: #e6e6e6;
+  white-space: pre-wrap;
+  display: block;
+  width: 100%;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+}
+
+.markdown-content a {
+  color: #409eff;
+  text-decoration: none;
+}
+
+.markdown-content a:hover {
+  text-decoration: underline;
+}
+
+.markdown-content strong {
+  font-weight: 600;
+}
+
+.markdown-content em {
+  font-style: italic;
+}
+
+.markdown-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0;
+  table-layout: fixed;
+}
+
+.markdown-content table th,
+.markdown-content table td {
+  border: 1px solid #dcdfe6;
+  padding: 8px;
+  text-align: left;
+  word-break: break-word;
+}
+
+.markdown-content table th {
+  background-color: #f5f7fa;
 }
 
 .usage-info {
   display: flex;
   align-items: center;
+}
+
+.clear-history-link {
+  color: #f56c6c;
+  cursor: pointer;
+  font-size: 14px;
+  text-decoration: none;
+  transition: all 0.3s;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.clear-history-link:hover {
+  background-color: rgba(245, 108, 108, 0.1);
+  text-decoration: none;
+}
+
+.clear-history-link.disabled {
+  color: #c0c4cc;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 </style> 
