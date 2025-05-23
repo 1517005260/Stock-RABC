@@ -170,52 +170,92 @@ class SaveView(APIView):
             else:
                 return JsonResponse({'code': 403, 'message': '权限不足，只有超级管理员可以添加用户'}, status=403)
         
-        if data['id'] == -1:  # 添加
-            obj_sysUser = SysUser(username=data['username'], password=data['password'], email=data['email'],
-                                  phonenumber=data['phonenumber'], status=data['status'], remark=data['remark'])
-            obj_sysUser.create_time = datetime.now()
-            obj_sysUser.avatar = 'default.jpg'
-            obj_sysUser.password = '123456'
-
-            obj_sysUser.save()
-        else:  # 修改
-            # 如果是自己修改信息，不允许修改状态和创建时间等敏感字段
-            if is_self_operation:
-                # 获取原始用户信息
-                original_user = SysUser.objects.get(id=data['id'])
+        try:
+            if data['id'] == -1:  # 添加
+                # 准备当前时间，使用timezone-aware datetime
+                from django.utils import timezone
+                current_time = timezone.now()
                 
-                # 保持原始数据不变的字段
                 obj_sysUser = SysUser(
-                    id=data['id'], 
                     username=data['username'], 
-                    password=original_user.password,  # 保持密码不变
-                    avatar=data.get('avatar', original_user.avatar),  # 使用新的头像或保持原头像
-                    email=data['email'], 
-                    phonenumber=data['phonenumber'],
-                    login_date=original_user.login_date, 
-                    status=original_user.status,  # 保持状态不变
-                    create_time=original_user.create_time,
-                    update_time=datetime.now(), 
-                    remark=data.get('remark', original_user.remark)  # 使用新的备注或保持原备注
+                    password=data.get('password', '123456'), 
+                    email=data.get('email', ''),
+                    phonenumber=data.get('phonenumber', ''),
+                    status=data.get('status', 1), 
+                    remark=data.get('remark', ''),
+                    create_time=current_time,
+                    update_time=current_time,
+                    avatar='default.jpg'
                 )
-            else:
-                # 超级管理员可以修改所有字段
-                obj_sysUser = SysUser(id=data['id'], username=data['username'], password=data['password'],
-                                      avatar=data['avatar'], email=data['email'], phonenumber=data['phonenumber'],
-                                      login_date=data['login_date'], status=data['status'], create_time=data['create_time'],
-                                      update_time=datetime.now(), remark=data['remark'])
-            
-            obj_sysUser.save()
-            
-            # 如果是修改自己的信息，返回更新后的用户数据
-            if is_self_operation:
-                return JsonResponse({
-                    'code': 200,
-                    'message': '个人信息修改成功',
-                    'user': SysUserSerializer(obj_sysUser).data
-                })
-            else:
-                return JsonResponse({'code': 200, 'message': '用户信息修改成功'})
+                obj_sysUser.save()
+                
+                # 创建用户-角色关联（默认为普通用户）
+                try:
+                    role = SysRole.objects.get(code='user')  # 获取普通用户角色
+                    user_role = SysUserRole(user=obj_sysUser, role=role)
+                    user_role.save()
+                except Exception as e:
+                    print(f"用户角色关联创建失败: {e}")
+                
+                return JsonResponse({'code': 200, 'message': '用户添加成功', 'user': SysUserSerializer(obj_sysUser).data})
+            else:  # 修改
+                # 如果是自己修改信息，不允许修改状态和创建时间等敏感字段
+                if is_self_operation:
+                    # 获取原始用户信息
+                    original_user = SysUser.objects.get(id=data['id'])
+                    
+                    # 保持原始数据不变的字段
+                    obj_sysUser = SysUser(
+                        id=data['id'], 
+                        username=data['username'], 
+                        password=original_user.password,  # 保持密码不变
+                        avatar=data.get('avatar', original_user.avatar),  # 使用新的头像或保持原头像
+                        email=data.get('email', original_user.email), 
+                        phonenumber=data.get('phonenumber', original_user.phonenumber),
+                        login_date=original_user.login_date, 
+                        status=original_user.status,  # 保持状态不变
+                        create_time=original_user.create_time,
+                        update_time=timezone.now(), 
+                        remark=data.get('remark', original_user.remark)  # 使用新的备注或保持原备注
+                    )
+                else:
+                    # 超级管理员可以修改所有字段
+                    from django.utils import timezone
+                    
+                    # 获取原始用户信息（用于保留未提供的字段）
+                    try:
+                        original_user = SysUser.objects.get(id=data['id'])
+                        
+                        obj_sysUser = SysUser(
+                            id=data['id'], 
+                            username=data.get('username', original_user.username),
+                            password=data.get('password', original_user.password),
+                            avatar=data.get('avatar', original_user.avatar), 
+                            email=data.get('email', original_user.email),
+                            phonenumber=data.get('phonenumber', original_user.phonenumber),
+                            login_date=data.get('login_date', original_user.login_date),
+                            status=data.get('status', original_user.status),
+                            create_time=data.get('create_time', original_user.create_time),
+                            update_time=timezone.now(),
+                            remark=data.get('remark', original_user.remark)
+                        )
+                    except SysUser.DoesNotExist:
+                        return JsonResponse({'code': 404, 'message': '用户不存在'})
+                
+                obj_sysUser.save()
+                
+                # 如果是修改自己的信息，返回更新后的用户数据
+                if is_self_operation:
+                    return JsonResponse({
+                        'code': 200,
+                        'message': '个人信息修改成功',
+                        'user': SysUserSerializer(obj_sysUser).data
+                    })
+                else:
+                    return JsonResponse({'code': 200, 'message': '用户信息修改成功'})
+        except Exception as e:
+            print(f"保存用户信息失败: {e}")
+            return JsonResponse({'code': 500, 'message': f'保存用户信息失败: {str(e)}'})
 
 
 class ActionView(APIView):
@@ -336,7 +376,8 @@ class PasswordView(APIView):
         id = request.GET.get("id")
         user_object = SysUser.objects.get(id=id)
         user_object.password = "123456"
-        user_object.update_time = datetime.now()
+        from django.utils import timezone
+        user_object.update_time = timezone.now()
         user_object.save()
         return JsonResponse({'code': 200})
 
@@ -349,6 +390,8 @@ class StatusView(APIView):
         status = data['status']
         user_object = SysUser.objects.get(id=id)
         user_object.status = status
+        from django.utils import timezone
+        user_object.update_time = timezone.now()
         user_object.save()
         return JsonResponse({'code': 200})
 
@@ -364,6 +407,64 @@ class GrantRole(APIView):
         for roleId in roleIdList:
             userRole = SysUserRole(user_id=user_id, role_id=roleId)
             userRole.save()
+            
+        # 检查是否是当前用户修改了自己的角色
+        current_user_id = getattr(request, 'user_id', None)
+        if current_user_id and int(user_id) == int(current_user_id):
+            try:
+                # 为当前用户生成新的token
+                user = SysUser.objects.get(id=user_id)
+                
+                # 生成新的JWT token
+                jwt_payload_handler = api_settings.JWT_PAYLOAD_HANDLER
+                jwt_encode_handler = api_settings.JWT_ENCODE_HANDLER
+                payload = jwt_payload_handler(user)
+                token = jwt_encode_handler(payload)
+                
+                # 获取用户更新后的角色
+                roleList = SysRole.objects.raw(
+                    "SELECT id, name, code FROM sys_role WHERE id IN "
+                    "(SELECT role_id FROM sys_user_role WHERE user_id=%s)", 
+                    [user_id]
+                )
+                
+                # 获取角色信息
+                roles = ",".join([role.name for role in roleList])
+                role_codes = [role.code for role in roleList]
+                
+                # 确定用户角色类型和对应的权限
+                is_superadmin = ROLE_SUPERADMIN in role_codes or '超级管理员' in [role.name for role in roleList]
+                is_admin = ROLE_ADMIN in role_codes or '管理员' in [role.name for role in roleList]
+                
+                # 根据角色设置权限
+                permissions = []
+                if is_superadmin:
+                    permissions = [
+                        'system:user:list', 'system:user:edit', 'system:user:add', 'system:user:remove', 'system:user:reset',
+                        'system:role:list', 'system:role:edit', 'system:role:add', 'system:role:remove',
+                        'system:user:profile', 'system:chat:use',
+                    ]
+                elif is_admin:
+                    permissions = [
+                        'system:user:list', 'system:user:edit', 'system:user:add', 'system:user:reset',
+                        'system:role:list', 'system:user:profile', 'system:chat:use',
+                    ]
+                else:
+                    permissions = [
+                        'system:user:list', 'system:role:list', 'system:user:profile', 'system:chat:use',
+                    ]
+                
+                # 返回新的token和权限信息
+                return JsonResponse({
+                    'code': 200,
+                    'token': token,
+                    'permissions': permissions,
+                    'message': '角色已更新，权限已刷新'
+                })
+                
+            except Exception as e:
+                print(f"更新当前用户权限时出错: {e}")
+                
         return JsonResponse({'code': 200})
 
 
@@ -468,19 +569,22 @@ class RegisterView(APIView):
             
         try:
             # 创建新用户
+            from django.utils import timezone
+            
             user = SysUser(
                 username=username,
                 password=password,
                 email=email,
                 status=1,  # 1表示正常状态
-                create_time=datetime.now(),
+                create_time=timezone.now(),
+                update_time=timezone.now(),
                 avatar='default.jpg'
             )
             user.save()
             
             # 为新用户分配普通用户角色
             role = SysRole.objects.get(code='user')  # 获取普通用户角色
-            user_role = SysUserRole(user_id=user.id, role_id=role.id)
+            user_role = SysUserRole(user=user, role=role)
             user_role.save()
             
             # 注册成功后直接登录

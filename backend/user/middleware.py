@@ -111,7 +111,7 @@ class PermissionMiddleware(MiddlewareMixin):
             # 获取用户信息
             user = SysUser.objects.get(id=user_id)
             
-            # 查询用户角色
+            # 查询用户角色 - 始终从数据库获取最新角色，确保权限实时更新
             user_roles = SysRole.objects.raw(
                 "SELECT id, code, name FROM sys_role WHERE id IN "
                 "(SELECT role_id FROM sys_user_role WHERE user_id=%s)", 
@@ -121,6 +121,10 @@ class PermissionMiddleware(MiddlewareMixin):
             # 角色名称列表和角色代码列表
             role_names = [role.name for role in user_roles]
             role_codes = [role.code for role in user_roles]
+            
+            # 缓存当前用户角色到请求对象，方便在视图中使用
+            request.user_role_names = role_names
+            request.user_role_codes = role_codes
             
             # 根据角色确定用户的权限
             user_permissions = []

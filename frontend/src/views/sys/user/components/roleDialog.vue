@@ -28,7 +28,11 @@
 import {defineEmits, defineProps, ref, watch} from "vue";
 import requestUtil, {getServerUrl} from "@/util/request";
 import {ElMessage} from 'element-plus'
+import {useStore} from 'vuex'
+import {useRouter} from 'vue-router'
 
+const store = useStore()
+const router = useRouter()
 
 const props = defineProps(
     {
@@ -91,15 +95,46 @@ const handleClose = () => {
 const handleConfirm = () => {
   formRef.value.validate(async (valid) => {
     if (valid) {
-      let result = await requestUtil.post("user/grantRole", {"id": form.value.id, "roleIds": form.value.checkedRoles});
-      let data = result.data;
-      if (data.code == 200) {
-        ElMessage.success("执行成功！")
+      // 获取当前用户ID
+      const currentUser = store.getters.getCurrentUser
+      const isCurrentUser = currentUser && currentUser.id === form.value.id
+      
+      try {
+        let result = await requestUtil.post("user/grantRole", {"id": form.value.id, "roleIds": form.value.checkedRoles});
+        let data = result.data;
+        if (data.code == 200) {
+          // 如果是当前用户的角色被修改，后端会返回新的token和权限
+          if (data.token && data.permissions) {
+            // 更新Vuex中的token和权限
+            store.commit('SET_TOKEN', data.token)
+            store.commit('SET_PERMISSIONS', data.permissions)
+            
+            // 如果角色从高权限变为低权限，提示用户权限已更改
+            if (data.message) {
+              ElMessage.success(data.message)
+            } else {
+              ElMessage.success("执行成功！")
+            }
+            
+            // 角色变更后重置标签页并重定向到首页
+            if (isCurrentUser) {
+              store.commit('RESET_TABS')
+              setTimeout(() => {
+                router.push('/')
+              }, 100)
+            }
+          } else {
+            ElMessage.success("执行成功！")
+          }
 
-        emits("initUserList")
-        handleClose();
-      } else {
-        ElMessage.error(data.msg);
+          emits("initUserList")
+          handleClose();
+        } else {
+          ElMessage.error(data.msg || "操作失败");
+        }
+      } catch (error) {
+        console.error("角色分配出错:", error)
+        ElMessage.error("操作失败，请稍后重试")
       }
     } else {
       console.log("fail")

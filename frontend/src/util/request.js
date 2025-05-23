@@ -2,6 +2,7 @@
 import axios from 'axios';
 import { ElMessage } from 'element-plus'
 import router from '@/router'
+import store from '@/store'
 
 let baseUrl="http://localhost:8000/";
 // 创建axios实例
@@ -16,7 +17,9 @@ const httpService = axios.create({
 // 添加请求拦截器
 httpService.interceptors.request.use(function (config) {
     // 在发送请求之前做些什么
-    const token = window.sessionStorage.getItem('token')
+    // 优先从Vuex store获取token，确保获取最新token
+    const token = store.getters.getToken
+    
     if (token) {
         // 确保请求头中带有token
         config.headers.Authorization = `Bearer ${token}`
