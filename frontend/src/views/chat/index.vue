@@ -7,6 +7,9 @@
           <el-tag v-if="usage.is_admin" type="success">管理员账号</el-tag>
           <el-tag v-else type="info">普通账号：今日已用 {{ usage.today_count }}/{{ usage.daily_limit }} 次</el-tag>
         </div>
+        <el-tooltip content="可以询问AI关于系统的信息，例如：作者是谁、系统是什么、能干什么" placement="bottom">
+          <el-button type="info" size="small" :icon="InfoFilled" circle />
+        </el-tooltip>
         <a 
           class="clear-history-link" 
           @click="clearChatHistory"
@@ -23,6 +26,14 @@
           <el-empty description="暂无聊天记录" />
           <p v-if="historyCleared">聊天记录已清除，您可以开始新的对话</p>
           <p v-else>您可以在下方输入框发送消息开始聊天</p>
+          <div class="system-info-tip">
+            <p><i class="el-icon"><info-filled /></i> 小提示：您可以询问关于该系统的信息，例如：</p>
+            <ul>
+              <li>作者是谁？</li>
+              <li>这个系统是什么？</li>
+              <li>这个系统能干什么？</li>
+            </ul>
+          </div>
         </div>
       </template>
       
@@ -479,7 +490,7 @@ export default {
 }
 </script>
 
-<style>
+<style lang="scss" scoped>
 .chat-container {
   display: flex;
   flex-direction: column;
@@ -492,17 +503,49 @@ export default {
 }
 
 .chat-header {
-  padding: 16px;
-  border-bottom: 1px solid #eaeaea;
   display: flex;
   justify-content: space-between;
   align-items: center;
-}
-
-.header-actions {
-  display: flex;
-  align-items: center;
-  gap: 16px;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e0e0e0;
+  background-color: #fff;
+  
+  h2 {
+    margin: 0;
+    font-size: 18px;
+    color: #303133;
+  }
+  
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    
+    .usage-info {
+      margin-right: 8px;
+    }
+    
+    .clear-history-link {
+      color: #f56c6c;
+      cursor: pointer;
+      font-size: 14px;
+      text-decoration: none;
+      transition: all 0.3s;
+      padding: 4px 8px;
+      border-radius: 4px;
+      
+      &:hover {
+        background-color: rgba(245, 108, 108, 0.1);
+        text-decoration: none;
+      }
+      
+      &.disabled {
+        color: #c0c4cc;
+        cursor: not-allowed;
+        pointer-events: none;
+      }
+    }
+  }
 }
 
 .chat-messages {
@@ -722,29 +765,32 @@ export default {
   background-color: #f5f7fa;
 }
 
-.usage-info {
-  display: flex;
-  align-items: center;
-}
-
-.clear-history-link {
-  color: #f56c6c;
-  cursor: pointer;
-  font-size: 14px;
-  text-decoration: none;
-  transition: all 0.3s;
-  padding: 4px 8px;
+.system-info-tip {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid #dcdfe6;
   border-radius: 4px;
+  background-color: #f8f8f9;
 }
 
-.clear-history-link:hover {
-  background-color: rgba(245, 108, 108, 0.1);
-  text-decoration: none;
+.system-info-tip p {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  color: #909399;
 }
 
-.clear-history-link.disabled {
-  color: #c0c4cc;
-  cursor: not-allowed;
-  pointer-events: none;
+.system-info-tip i {
+  margin-right: 8px;
+}
+
+.system-info-tip ul {
+  padding-left: 20px;
+  margin: 10px 0;
+  line-height: 1.6;
+  list-style-type: disc;
+}
+
+.system-info-tip li {
+  margin-bottom: 5px;
 }
 </style> 

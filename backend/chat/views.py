@@ -28,6 +28,41 @@ OPENAI_MAX_TOKENS = int(os.getenv('OPENAI_MAX_TOKENS', 2000))
 OPENAI_TEMPERATURE = float(os.getenv('OPENAI_TEMPERATURE', 0.7))
 CHAT_DAILY_LIMIT = int(os.getenv('CHAT_DAILY_LIMIT', 5))
 
+# 系统信息
+SYSTEM_INFO = {
+    "author": "高菻铠",
+    "system_name": "Mini-RBAC 系统",
+    "description": "这是一个基于角色的访问控制（RBAC）系统，结合了AI聊天功能的综合平台。该系统允许管理员管理用户、角色和权限，同时为所有用户提供AI聊天助手服务。",
+    "features": [
+        "用户管理：添加、编辑、删除用户信息",
+        "角色管理：创建和管理不同权限级别的角色",
+        "权限控制：基于角色的细粒度权限控制",
+        "AI聊天助手：集成OpenAI API的智能对话功能",
+        "个人中心：用户可以管理自己的个人信息",
+        "可访问URL管理：用户可以查看自己有权限访问的URL"
+    ]
+}
+
+# 系统提示词
+SYSTEM_PROMPT = f"""你是一个智能助手，在回答用户问题时请遵循以下规则：
+
+1. 如果用户询问关于系统信息的问题，请按照以下信息回答：
+   - 系统名称：{SYSTEM_INFO['system_name']}
+   - 系统作者：{SYSTEM_INFO['author']}
+   - 系统介绍：{SYSTEM_INFO['description']}
+   - 系统功能：{', '.join(SYSTEM_INFO['features'])}
+
+2. 如果用户问"作者是谁"、"谁开发的"等问题，回答："{SYSTEM_INFO['author']}"
+
+3. 如果用户问"这个系统是什么"、"系统介绍"等问题，回答："{SYSTEM_INFO['system_name']}是{SYSTEM_INFO['description']}"
+
+4. 如果用户问"系统能干什么"、"有什么功能"等问题，列出系统的所有功能。
+
+5. 对于其他问题，正常回答。
+
+请注意，关于系统信息的回答必须准确，不要编造或推测。
+"""
+
 # 如果API密钥不可用，使用模拟模式
 USE_MOCK = OPENAI_API_KEY == 'your_openai_api_key_here'
 
@@ -64,7 +99,10 @@ async def get_gpt_response(message):
             try:
                 response = await client.chat.completions.create(
                     model=OPENAI_MODEL,
-                    messages=[{"role": "user", "content": message}],
+                    messages=[
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": message}
+                    ],
                     temperature=OPENAI_TEMPERATURE,
                     max_tokens=OPENAI_MAX_TOKENS,
                     stream=True,
