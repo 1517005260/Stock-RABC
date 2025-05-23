@@ -88,6 +88,7 @@ class PermissionMiddleware(MiddlewareMixin):
             "/user/updateAvatar",   # 修改自己的头像
             "/user/uploadImage",    # 上传图片
             "/user/save",          # 修改个人信息
+            "/user/accessibleUrls", # 获取可访问URL列表
             "/chat/",              # 聊天API，允许所有用户访问
             "/chat/stream/",        # 聊天流式API
         ]

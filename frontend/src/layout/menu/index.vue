@@ -45,6 +45,12 @@
       </el-icon>
       <span>个人中心</span>
     </el-menu-item>
+    <el-menu-item index="/accessibleUrls" @click="openTab({name:'我的可访问URL', path:'/accessibleUrls'})">
+      <el-icon>
+        <menu/>
+      </el-icon>
+      <span>我的可访问URL</span>
+    </el-menu-item>
   </el-menu>
 </template>
 
@@ -52,7 +58,7 @@
 import { computed } from 'vue'
 import store from "@/store";
 import { useRoute } from 'vue-router'
-import { HomeFilled, ChatDotRound } from '@element-plus/icons-vue'
+import { HomeFilled, ChatDotRound, Menu } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const defaultActive = computed(() => route.path)

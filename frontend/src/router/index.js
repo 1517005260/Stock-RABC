@@ -46,6 +46,12 @@ const routes = [
         name: 'AI聊天',
         component: () => import('../views/chat/index.vue'),
         meta: { title: 'AI聊天', requiresAuth: true }
+      },
+      {
+        path: '/accessibleUrls',
+        name: '我的URL',
+        component: () => import('../views/accessible-urls/index.vue'),
+        meta: { title: '我的可访问URL', requiresAuth: true }
       }
     ]
   },

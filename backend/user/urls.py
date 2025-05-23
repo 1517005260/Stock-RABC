@@ -19,4 +19,5 @@ urlpatterns = [
     path('current', views.CurrentUserView.as_view(), name='current'),  # 获取当前用户信息
     path('test', views.TestView.as_view(), name="test"),  # 测试
     path('jwt_test', views.JwtTestView.as_view(), name="jwt_test"),  # jwt测试
+    path('accessibleUrls', views.AccessibleUrlsView.as_view(), name="accessibleUrls"),  # 获取可访问URL列表
 ]

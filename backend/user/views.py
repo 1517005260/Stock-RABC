@@ -619,3 +619,80 @@ class RegisterView(APIView):
         except Exception as e:
             print(e)
             return JsonResponse({'code': 500, 'info': '注册失败，请稍后重试'})
+
+
+# 获取用户可访问的所有URL
+class AccessibleUrlsView(APIView):
+    def get(self, request):
+        try:
+            # 获取用户ID
+            user_id = getattr(request, 'user_id', None)
+            if not user_id:
+                # 尝试从请求头获取token
+                auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+                if not auth_header:
+                    return JsonResponse({'code': 401, 'message': '未授权'}, status=401)
+                
+                # 解析token获取用户信息
+                token = auth_header.split(' ')[1] if len(auth_header.split(' ')) > 1 else auth_header
+                
+                try:
+                    jwt_decode_handler = api_settings.JWT_DECODE_HANDLER
+                    payload = jwt_decode_handler(token)
+                    user_id = payload.get('user_id')
+                    if not user_id:
+                        return JsonResponse({'code': 401, 'message': 'Token无效'}, status=401)
+                except Exception as e:
+                    print(f"Token解析失败: {e}")
+                    return JsonResponse({'code': 401, 'message': 'Token无效'}, status=401)
+            
+            # 获取用户角色
+            roleList = SysRole.objects.raw("select id, name, code from sys_role where id in (select role_id from "
+                                          "sys_user_role where user_id=" + str(user_id) + ")")
+            
+            # 获取角色名称和代码
+            role_names = [role.name for role in roleList]
+            role_codes = [role.code for role in roleList]
+            
+            # 确定用户角色类型
+            is_superadmin = ROLE_SUPERADMIN in role_codes or '超级管理员' in role_names
+            is_admin = ROLE_ADMIN in role_codes or '管理员' in role_names
+            
+            # 所有可能的路由和对应的权限
+            all_routes = [
+                {"path": "/index", "name": "首页", "requires_auth": True},
+                {"path": "/chat", "name": "AI聊天助手", "requires_auth": True, "permission": "system:chat:use"},
+                {"path": "/sys/user", "name": "用户管理", "requires_auth": True, "permission": "system:user:list"},
+                {"path": "/sys/role", "name": "角色管理", "requires_auth": True, "permission": "system:role:list"},
+                {"path": "/userCenter", "name": "个人中心", "requires_auth": True, "permission": "system:user:profile"},
+                {"path": "/accessibleUrls", "name": "我的可访问URL", "requires_auth": True}
+            ]
+            
+            # 根据用户角色过滤可访问的路由
+            accessible_routes = []
+            
+            # 如果是超级管理员，可以访问所有路由
+            if is_superadmin:
+                accessible_routes = all_routes
+            # 如果是管理员，可以访问除了角色管理之外的路由
+            elif is_admin:
+                accessible_routes = [route for route in all_routes if route["path"] != "/sys/role"]
+            # 如果是普通用户，只能访问首页、个人中心和AI聊天
+            else:
+                accessible_routes = [route for route in all_routes if route["path"] in ["/index", "/userCenter", "/chat", "/accessibleUrls"]]
+            
+            return JsonResponse({
+                'code': 200,
+                'accessibleUrls': accessible_routes
+            })
+            
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"获取可访问URL列表时出错: {e}")
+            print(f"错误详情: {error_details}")
+            return JsonResponse({
+                'code': 500, 
+                'message': f'系统错误: {str(e)}', 
+                'detail': error_details if settings.DEBUG else None
+            }, status=500)
