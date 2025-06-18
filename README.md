@@ -1,4 +1,4 @@
-# RBAC权限管理系统 (Mini-RBAC)
+# RBAC权限管理系统
 
 这是一个基于Django + Vue3的RBAC (Role-Based Access Control) 权限管理系统，集成了AI聊天功能。系统采用前后端分离架构，提供完善的用户、角色、权限管理功能。
 
