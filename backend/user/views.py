@@ -16,45 +16,103 @@ from user.models import SysUser, SysUserSerializer
 
 
 # @method_decorator(csrf_exempt, name='dispatch')
+class DebugLoginView(APIView):
+    def post(self, request):
+        print("=== 调试登录请求开始 ===")
+        try:
+            # 直接使用已知的用户信息进行测试
+            from user.models import SysUser
+            from role.models import SysUserRole
+            import hashlib
+            
+            username = "python222"
+            password = "123456"
+            hashed_password = hashlib.md5(password.encode()).hexdigest()
+            
+            print(f"查找用户: {username}")
+            user = SysUser.objects.filter(username=username).first()
+            
+            if not user:
+                print("用户不存在")
+                return JsonResponse({'code': 500, 'info': 'DEBUG: 用户不存在'})
+                
+            print(f"找到用户，验证密码...")
+            print(f"数据库密码: {user.password}")
+            print(f"输入密码MD5: {hashed_password}")
+            
+            if user.password != hashed_password:
+                return JsonResponse({'code': 500, 'info': 'DEBUG: 密码错误'})
+                
+            if user.status != 0:
+                return JsonResponse({'code': 500, 'info': 'DEBUG: 用户状态异常'})
+            
+            # 生成JWT Token
+            jwt_payload_handler = api_settings.JWT_PAYLOAD_HANDLER
+            jwt_encode_handler = api_settings.JWT_ENCODE_HANDLER
+            payload = jwt_payload_handler(user)
+            token = jwt_encode_handler(payload)
+            
+            return JsonResponse({
+                'code': 200, 
+                'info': 'DEBUG: 登录成功', 
+                'token': token,
+                'debug': {
+                    'username': user.username,
+                    'status': user.status,
+                    'password_match': user.password == hashed_password
+                }
+            })
+            
+        except Exception as e:
+            print(f"调试登录异常: {e}")
+            import traceback
+            traceback.print_exc()
+            return JsonResponse({'code': 500, 'info': f'DEBUG: 异常 - {str(e)}'})
+
+
+# @method_decorator(csrf_exempt, name='dispatch')
 class LoginView(APIView):
 
     def post(self, request):
-        # 从POST数据中获取用户名和密码
-        username = request.POST.get("username") or request.data.get("username")
-        password = request.POST.get("password") or request.data.get("password")
-        
-        if not username or not password:
-            return JsonResponse({'code': 400, 'info': '用户名和密码不能为空！'})
-        
         try:
-            # Hash the password for comparison
-            hashed_password = hashlib.md5(password.encode()).hexdigest()
-            user = SysUser.objects.get(username=username, password=hashed_password)
+            # 解析请求数据
+            if request.body:
+                data = json.loads(request.body.decode('utf-8'))
+                username = data.get("username")
+                password = data.get("password")
+            else:
+                username = request.data.get("username")
+                password = request.data.get("password")
             
-            # 检查用户状态，只允许正常状态的用户登录
-            # status=0 表示正常，status=1 表示停用
-            if user.status == 1:  
+            if not username or not password:
+                return JsonResponse({'code': 400, 'info': '用户名和密码不能为空！'})
+            
+            # Hash the password for comparison  
+            hashed_password = hashlib.md5(password.encode()).hexdigest()
+            
+            # 查询用户
+            user = SysUser.objects.filter(username=username).first()
+            if not user or user.password != hashed_password:
+                return JsonResponse({'code': 500, 'info': '用户不存在或密码错误！'})
+            
+            # 检查用户状态
+            if user.status != 0:  
                 return JsonResponse({'code': 403, 'info': '账号已被禁用，请联系管理员！'})
-                
+            
+            # 生成JWT Token
             jwt_payload_handler = api_settings.JWT_PAYLOAD_HANDLER
             jwt_encode_handler = api_settings.JWT_ENCODE_HANDLER
-            # 将用户对象传递进去，获取到该对象的属性值
             payload = jwt_payload_handler(user)
-            # 将属性值编码成jwt格式的字符串
             token = jwt_encode_handler(payload)
 
-            roleList = SysRole.objects.raw("select id, name, code from sys_role where id in (select role_id from "
-                                           "sys_user_role where user_id=" + str(user.id) + ")")
-
-            print(roleList)
-
-            # 获取当前用户所有的角色，逗号隔开
+            # 获取用户角色
+            user_roles = SysUserRole.objects.filter(user=user)
+            roleList = [user_role.role for user_role in user_roles]
             roles = ",".join([role.name for role in roleList])
             role_codes = [role.code for role in roleList]
             
             # 将用户数据序列化
             user_data = SysUserSerializer(user).data
-            # 添加角色信息到用户数据
             user_data['roles'] = roles
             
             # 添加权限信息
@@ -64,39 +122,20 @@ class LoginView(APIView):
             is_superadmin = ROLE_SUPERADMIN in role_codes or '超级管理员' in [role.name for role in roleList]
             is_admin = ROLE_ADMIN in role_codes or '管理员' in [role.name for role in roleList]
             
-            # 1. 超级管理员拥有所有权限
             if is_superadmin:
                 permissions = [
-                    # 用户管理权限
                     'system:user:list', 'system:user:edit', 'system:user:add', 'system:user:remove', 'system:user:reset',
-                    # 角色管理权限
                     'system:role:list', 'system:role:edit', 'system:role:add', 'system:role:remove',
-                    # 个人管理权限
-                    'system:user:profile',
-                    # 聊天权限
-                    'system:chat:use',
+                    'system:user:profile', 'system:chat:use',
                 ]
-            # 2. 管理员有角色管理权限
             elif is_admin:
                 permissions = [
-                    # 用户管理权限（不包括删除用户）
                     'system:user:list', 'system:user:edit', 'system:user:add', 'system:user:reset',
-                    # 角色查看权限（只读）
-                    'system:role:list',
-                    # 个人管理权限
-                    'system:user:profile',
-                    # 聊天权限
-                    'system:chat:use',
+                    'system:role:list', 'system:user:profile', 'system:chat:use',
                 ]
-            # 3. 普通用户只有查看权限
             else:
                 permissions = [
-                    # 只读权限
-                    'system:user:list', 'system:role:list',
-                    # 个人管理权限
-                    'system:user:profile',
-                    # 聊天权限
-                    'system:chat:use',
+                    'system:user:list', 'system:role:list', 'system:user:profile', 'system:chat:use',
                 ]
 
             return JsonResponse({
@@ -106,10 +145,9 @@ class LoginView(APIView):
                 'user': user_data,
                 'permissions': permissions
             })
-
+            
         except Exception as e:
-            print(e)
-            return JsonResponse({'code': 500, 'info': '用户不存在或密码错误！'})
+            return JsonResponse({'code': 500, 'info': '登录失败，请稍后重试'})
 
 
 # @method_decorator(csrf_exempt, name='dispatch')

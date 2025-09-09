@@ -456,3 +456,200 @@ def remove_from_watchlist(request, ts_code):
             'code': 500,
             'msg': f'移除自选股失败: {str(e)}'
         })
+
+
+@admin_required
+def admin_user_accounts(request):
+    """管理员查看用户账户 - 仅管理员可访问"""
+    try:
+        page = int(request.GET.get('page', 1))
+        page_size = int(request.GET.get('pageSize', 20))
+        
+        # 获取所有用户账户
+        queryset = UserStockAccount.objects.select_related('user').all()
+        
+        # 分页
+        paginator = Paginator(queryset.order_by('-create_time'), page_size)
+        accounts = paginator.get_page(page)
+        
+        result = []
+        for account in accounts:
+            result.append({
+                'user_id': account.user.id,
+                'username': account.user.username,
+                'realname': account.user.realname,
+                'account_balance': float(account.account_balance),
+                'frozen_balance': float(account.frozen_balance),
+                'total_assets': float(account.total_assets),
+                'total_profit': float(account.total_profit),
+                'create_time': account.create_time.strftime('%Y-%m-%d %H:%M:%S'),
+                'update_time': account.update_time.strftime('%Y-%m-%d %H:%M:%S'),
+            })
+        
+        return JsonResponse({
+            'code': 200,
+            'msg': '获取成功',
+            'data': {
+                'list': result,
+                'total': paginator.count,
+                'page': page,
+                'pageSize': page_size,
+                'totalPages': paginator.num_pages,
+            }
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'code': 500,
+            'msg': f'获取用户账户失败: {str(e)}'
+        })
+
+
+@admin_required
+@csrf_exempt
+@require_http_methods(["POST"])
+def admin_freeze_user(request):
+    """管理员冻结用户账户 - 仅管理员可访问"""
+    try:
+        data = json.loads(request.body)
+        user_id = data.get('user_id')
+        freeze = data.get('freeze', True)  # True冻结，False解冻
+        
+        if not user_id:
+            return JsonResponse({
+                'code': 400,
+                'msg': '请提供用户ID'
+            })
+        
+        try:
+            user = SysUser.objects.get(id=user_id)
+            user.status = 1 if freeze else 0  # 1停用，0启用
+            user.save()
+            
+            action = '冻结' if freeze else '解冻'
+            return JsonResponse({
+                'code': 200,
+                'msg': f'{action}用户成功'
+            })
+            
+        except SysUser.DoesNotExist:
+            return JsonResponse({
+                'code': 404,
+                'msg': '用户不存在'
+            })
+        
+    except Exception as e:
+        return JsonResponse({
+            'code': 500,
+            'msg': f'操作失败: {str(e)}'
+        })
+
+
+@require_login
+@csrf_exempt
+@require_http_methods(["POST"])
+def cancel_trade(request):
+    """撤销交易 - 所有用户可访问（仅能撤销自己的待成交订单）"""
+    try:
+        user = SysUser.objects.get(id=request.user_id)
+        data = json.loads(request.body)
+        trade_id = data.get('trade_id')
+        
+        if not trade_id:
+            return JsonResponse({
+                'code': 400,
+                'msg': '请提供交易记录ID'
+            })
+        
+        try:
+            trade = TradeRecord.objects.get(id=trade_id, user=user, status='PENDING')
+            
+            # 如果是买入订单，需要解冻资金
+            if trade.trade_type == 'BUY':
+                account = TradingService.get_or_create_account(user)
+                total_cost = trade.trade_amount + trade.commission
+                account.account_balance += total_cost
+                account.frozen_balance -= total_cost
+                account.save()
+            
+            # 如果是卖出订单，需要解冻股票
+            elif trade.trade_type == 'SELL':
+                try:
+                    position = UserPosition.objects.get(user=user, ts_code=trade.ts_code)
+                    position.available_shares += trade.trade_shares
+                    position.save()
+                except UserPosition.DoesNotExist:
+                    pass
+            
+            # 更新交易状态
+            trade.status = 'CANCELLED'
+            trade.remark = (trade.remark or '') + ' [用户撤销]'
+            trade.save()
+            
+            return JsonResponse({
+                'code': 200,
+                'msg': '撤销成功'
+            })
+            
+        except TradeRecord.DoesNotExist:
+            return JsonResponse({
+                'code': 404,
+                'msg': '交易记录不存在或无法撤销'
+            })
+        
+    except Exception as e:
+        return JsonResponse({
+            'code': 500,
+            'msg': f'撤销失败: {str(e)}'
+        })
+
+
+@require_login
+def trading_statistics(request):
+    """获取交易统计 - 所有用户可访问"""
+    try:
+        user = SysUser.objects.get(id=request.user_id)
+        
+        # 获取交易统计
+        buy_trades = TradeRecord.objects.filter(user=user, trade_type='BUY', status='COMPLETED')
+        sell_trades = TradeRecord.objects.filter(user=user, trade_type='SELL', status='COMPLETED')
+        
+        buy_count = buy_trades.count()
+        sell_count = sell_trades.count()
+        buy_amount = sum(float(trade.trade_amount) for trade in buy_trades)
+        sell_amount = sum(float(trade.trade_amount) for trade in sell_trades)
+        total_commission = sum(float(trade.commission) for trade in TradeRecord.objects.filter(user=user, status='COMPLETED'))
+        
+        # 持仓统计
+        positions = TradingService.get_user_positions(user)
+        total_market_value = sum(pos['market_value'] for pos in positions)
+        total_profit_loss = sum(pos['profit_loss'] for pos in positions)
+        
+        # 账户信息
+        account = TradingService.get_or_create_account(user)
+        
+        statistics = {
+            'account_balance': float(account.account_balance),
+            'total_assets': float(account.total_assets),
+            'market_value': total_market_value,
+            'total_profit_loss': total_profit_loss,
+            'buy_count': buy_count,
+            'sell_count': sell_count,
+            'buy_amount': buy_amount,
+            'sell_amount': sell_amount,
+            'total_commission': total_commission,
+            'position_count': len(positions),
+            'total_trades': buy_count + sell_count,
+        }
+        
+        return JsonResponse({
+            'code': 200,
+            'msg': '获取成功',
+            'data': statistics
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'code': 500,
+            'msg': f'获取统计数据失败: {str(e)}'
+        })

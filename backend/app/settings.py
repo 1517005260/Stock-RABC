@@ -24,7 +24,7 @@ SECRET_KEY = 'django-insecure--t5^=7^+gm$zrlb2=d^9t5rgklea_lhx43c3!(#7d8d0$wn!4=
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['*']
 
 # Application definition
 
@@ -38,6 +38,8 @@ INSTALLED_APPS = [
     'corsheaders',
     'rest_framework',
     'rest_framework_jwt',
+    'channels',  # WebSocket支持
+    'django_crontab',  # 定时任务支持
     'user.apps.UserConfig',
     'role.apps.RoleConfig',
     'chat.apps.ChatConfig',
@@ -114,28 +116,20 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'app.wsgi.application'
 
-# Database
+# Database - 统一数据库配置，解决跨库关联问题
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
-    },
-    'db_user': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db_user.sqlite3',
     }
 }
-# 引入数据库路由配置
-DATABASE_ROUTERS = ['utils.router.DatabaseAppsRouter']
-# 数据库与APP的映射配置
-DATABASE_APPS_MAPPING = {
-    'user': 'db_user',
-    'role': 'db_user',
-    'chat': 'db_user', 
-    # 'menu': 'db_user',
-}
+
+# 移除数据库路由配置，使用统一数据库
+# DATABASE_ROUTERS = ['utils.router.DatabaseAppsRouter']
+
+# 移除数据库与APP的映射配置，使用统一数据库架构
 
 # Password validation
 # https://docs.djangoproject.com/en/5.1/ref/settings/#auth-password-validators
@@ -176,8 +170,67 @@ STATIC_URL = 'static/'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+# WebSocket (Channels) 配置
+ASGI_APPLICATION = 'app.asgi.application'
+
+# 使用内存通道层（开发环境）
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels.layers.InMemoryChannelLayer',
+    },
+}
+
+# 生产环境可以使用Redis
+# CHANNEL_LAYERS = {
+#     'default': {
+#         'BACKEND': 'channels_redis.core.RedisChannelLayer',
+#         'CONFIG': {
+#             "hosts": [('127.0.0.1', 6379)],
+#         },
+#     },
+# }
+
+# 定时任务配置
+CRONJOBS = [
+    # 每个交易日收盘后（15:10）同步当日股票数据
+    ('10 15 * * 1-5', 'stock.tasks.sync_daily_stock_data', '>> /tmp/sync_stock_data.log 2>&1'),
+    
+    # 每个交易日收盘后（15:15）同步公司信息（每周一次）
+    ('15 15 * * 1', 'stock.tasks.sync_company_info', '>> /tmp/sync_company_info.log 2>&1'),
+    
+    # 每天早上8点同步财经新闻
+    ('0 8 * * *', 'stock.tasks.sync_financial_news', '>> /tmp/sync_news.log 2>&1'),
+    
+    # 每小时清理过期的WebSocket连接（可选）
+    ('0 * * * *', 'stock.tasks.cleanup_websocket_connections', '>> /tmp/cleanup_ws.log 2>&1'),
+]
+
+# 定时任务时区
+CRONTAB_DJANGO_SETTINGS_MODULE = 'app.settings'
+
 MEDIA_ROOT = BASE_DIR / 'media'
 MEDIA_URL = 'media/'
 
 # 异步配置
 ASGI_APPLICATION = 'app.asgi.application'
+
+# JWT配置
+import datetime
+
+JWT_AUTH = {
+    'JWT_SECRET_KEY': SECRET_KEY,
+    'JWT_GET_USER_SECRET_KEY': None,
+    'JWT_PUBLIC_KEY': None,
+    'JWT_PRIVATE_KEY': None,
+    'JWT_ALGORITHM': 'HS256',
+    'JWT_VERIFY': True,
+    'JWT_VERIFY_EXPIRATION': True,
+    'JWT_LEEWAY': 0,
+    'JWT_EXPIRATION_DELTA': datetime.timedelta(days=1),
+    'JWT_AUDIENCE': None,
+    'JWT_ISSUER': None,
+    'JWT_ALLOW_REFRESH': False,
+    'JWT_REFRESH_EXPIRATION_DELTA': datetime.timedelta(days=7),
+    'JWT_AUTH_HEADER_PREFIX': 'Bearer',
+    'JWT_AUTH_COOKIE': None,
+}

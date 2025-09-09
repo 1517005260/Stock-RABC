@@ -482,3 +482,362 @@ class NewsService:
             category=category,
             related_stocks=related_stocks
         )
+
+
+class RealTimeDataService:
+    """实时股票数据服务 - 支持5秒刷新功能"""
+    
+    @staticmethod
+    def is_trading_time():
+        """判断是否为交易时间"""
+        from datetime import datetime, time as dt_time
+        
+        now = datetime.now()
+        current_time = now.time()
+        weekday = now.weekday()
+        
+        # 周末不交易
+        if weekday >= 5:  # 5=Saturday, 6=Sunday
+            return False
+        
+        # 交易时间：9:30-11:30, 13:00-15:00
+        morning_start = dt_time(9, 30)
+        morning_end = dt_time(11, 30)
+        afternoon_start = dt_time(13, 0)
+        afternoon_end = dt_time(15, 0)
+        
+        return (morning_start <= current_time <= morning_end) or \
+               (afternoon_start <= current_time <= afternoon_end)
+    
+    @staticmethod
+    def get_time_period():
+        """获取当前时间段"""
+        from datetime import datetime, time as dt_time
+        
+        now = datetime.now()
+        current_time = now.time()
+        weekday = now.weekday()
+        
+        if weekday >= 5:
+            return 'weekend'
+        
+        # 盘前：8:00-9:30
+        if dt_time(8, 0) <= current_time < dt_time(9, 30):
+            return 'pre_market'
+        
+        # 交易时间：9:30-11:30, 13:00-15:00
+        elif (dt_time(9, 30) <= current_time <= dt_time(11, 30)) or \
+             (dt_time(13, 0) <= current_time <= dt_time(15, 0)):
+            return 'trading_time'
+        
+        # 中午休息：11:30-13:00
+        elif dt_time(11, 30) < current_time < dt_time(13, 0):
+            return 'lunch_break'
+        
+        # 盘后：15:00-22:00
+        elif dt_time(15, 0) < current_time <= dt_time(22, 0):
+            return 'after_market'
+        
+        else:
+            return 'closed'
+    
+    @staticmethod 
+    def get_stock_realtime_price(ts_code):
+        """获取股票实时价格 - 用于5秒刷新"""
+        try:
+            # 在交易时间，尝试获取实时数据
+            if RealTimeDataService.is_trading_time() and pro:
+                try:
+                    # 获取实时行情（限制调用频率）
+                    df = pro.daily(ts_code=ts_code, trade_date='', limit=1)
+                    if not df.empty:
+                        row = df.iloc[0]
+                        return {
+                            'success': True,
+                            'data': {
+                                'ts_code': ts_code,
+                                'current_price': float(row['close']),
+                                'open_price': float(row['open']),
+                                'high_price': float(row['high']),
+                                'low_price': float(row['low']),
+                                'change': float(row['change']),
+                                'pct_chg': float(row['pct_chg']),
+                                'volume': int(row['vol']),
+                                'amount': float(row['amount']),
+                                'timestamp': datetime.now().isoformat(),
+                                'is_real_time': True
+                            }
+                        }
+                except Exception as e:
+                    print(f"实时数据获取失败: {e}")
+            
+            # 回退到数据库最新数据
+            latest_daily = StockDaily.objects.filter(ts_code=ts_code).order_by('-trade_date').first()
+            if latest_daily:
+                return {
+                    'success': True,
+                    'data': {
+                        'ts_code': ts_code,
+                        'current_price': float(latest_daily.close) if latest_daily.close else 0,
+                        'open_price': float(latest_daily.open) if latest_daily.open else 0,
+                        'high_price': float(latest_daily.high) if latest_daily.high else 0,
+                        'low_price': float(latest_daily.low) if latest_daily.low else 0,
+                        'change': float(latest_daily.change) if latest_daily.change else 0,
+                        'pct_chg': float(latest_daily.pct_chg) if latest_daily.pct_chg else 0,
+                        'volume': latest_daily.vol if latest_daily.vol else 0,
+                        'amount': float(latest_daily.amount) if latest_daily.amount else 0,
+                        'timestamp': datetime.now().isoformat(),
+                        'is_real_time': False
+                    }
+                }
+            
+            return {
+                'success': False,
+                'message': '未找到股票数据',
+                'data': None
+            }
+            
+        except Exception as e:
+            return {
+                'success': False,
+                'message': f'获取实时价格失败: {str(e)}',
+                'data': None
+            }
+    
+    @staticmethod
+    def get_stock_batch_prices(ts_codes, limit=20):
+        """批量获取股票实时价格"""
+        try:
+            # 限制批量查询数量
+            ts_codes = ts_codes[:limit]
+            results = []
+            
+            for ts_code in ts_codes:
+                price_data = RealTimeDataService.get_stock_realtime_price(ts_code)
+                if price_data['success']:
+                    results.append(price_data['data'])
+            
+            return {
+                'success': True,
+                'data': results,
+                'count': len(results)
+            }
+            
+        except Exception as e:
+            return {
+                'success': False,
+                'message': f'批量获取价格失败: {str(e)}',
+                'data': []
+            }
+    
+    @staticmethod
+    def get_market_overview():
+        """获取市场概况"""
+        try:
+            # 获取主要指数数据
+            major_indices = ['000001.SH', '399001.SZ', '399006.SZ']  # 上证指数、深成指、创业板指
+            indices_data = []
+            
+            for index_code in major_indices:
+                try:
+                    # 从IndexDaily表获取数据
+                    latest_index = IndexDaily.objects.filter(ts_code=index_code).order_by('-trade_date').first()
+                    if latest_index:
+                        indices_data.append({
+                            'ts_code': index_code,
+                            'name': RealTimeDataService.get_index_name(index_code),
+                            'current_price': float(latest_index.close) if latest_index.close else 0,
+                            'change': float(latest_index.change) if latest_index.change else 0,
+                            'pct_chg': float(latest_index.pct_chg) if latest_index.pct_chg else 0,
+                            'volume': latest_index.vol if latest_index.vol else 0,
+                            'amount': float(latest_index.amount) if latest_index.amount else 0,
+                        })
+                except Exception as e:
+                    continue
+            
+            # 获取市场统计数据
+            latest_date = StockDaily.objects.values('trade_date').order_by('-trade_date').first()
+            market_stats = {}
+            
+            if latest_date:
+                daily_data = StockDaily.objects.filter(trade_date=latest_date['trade_date'])
+                
+                # 统计涨跌家数
+                up_count = daily_data.filter(pct_chg__gt=0).count()
+                down_count = daily_data.filter(pct_chg__lt=0).count()
+                equal_count = daily_data.filter(pct_chg=0).count()
+                
+                market_stats = {
+                    'trade_date': latest_date['trade_date'].strftime('%Y-%m-%d'),
+                    'total_stocks': daily_data.count(),
+                    'up_count': up_count,
+                    'down_count': down_count,
+                    'equal_count': equal_count,
+                    'up_ratio': round(up_count / daily_data.count() * 100, 2) if daily_data.count() > 0 else 0
+                }
+            
+            return {
+                'success': True,
+                'data': {
+                    'indices': indices_data,
+                    'market_stats': market_stats,
+                    'trading_status': {
+                        'is_trading_time': RealTimeDataService.is_trading_time(),
+                        'time_period': RealTimeDataService.get_time_period(),
+                        'timestamp': datetime.now().isoformat()
+                    }
+                }
+            }
+            
+        except Exception as e:
+            return {
+                'success': False,
+                'message': f'获取市场概况失败: {str(e)}',
+                'data': None
+            }
+    
+    @staticmethod
+    def get_index_name(ts_code):
+        """获取指数名称"""
+        index_names = {
+            '000001.SH': '上证指数',
+            '399001.SZ': '深证成指',
+            '399006.SZ': '创业板指',
+            '000300.SH': '沪深300',
+            '000905.SH': '中证500'
+        }
+        return index_names.get(ts_code, ts_code)
+    
+    @staticmethod
+    def get_intraday_chart_data(ts_code):
+        """获取分时图数据 - 支持5秒刷新的分时数据"""
+        try:
+            # 简化版分时数据，基于最新日线数据模拟
+            latest_daily = StockDaily.objects.filter(ts_code=ts_code).order_by('-trade_date').first()
+            if not latest_daily:
+                return {
+                    'success': False,
+                    'message': '未找到股票数据'
+                }
+            
+            # 模拟分时数据点（实际项目中应该获取真实分时数据）
+            import random
+            from datetime import datetime, timedelta, time as dt_time
+            
+            base_price = float(latest_daily.close)
+            pre_close = float(latest_daily.pre_close) if latest_daily.pre_close else base_price
+            intraday_data = []
+            
+            # 生成9:30到15:00的分时数据点
+            start_time = datetime.now().replace(hour=9, minute=30, second=0, microsecond=0)
+            current_price = base_price
+            
+            for i in range(0, 330, 1):  # 每1分钟一个数据点
+                time_point = start_time + timedelta(minutes=i)
+                
+                # 跳过11:30-13:00的休市时间
+                if dt_time(11, 30) < time_point.time() < dt_time(13, 0):
+                    continue
+                
+                # 在当日价格范围内随机波动
+                high_price = float(latest_daily.high) if latest_daily.high else base_price * 1.02
+                low_price = float(latest_daily.low) if latest_daily.low else base_price * 0.98
+                
+                # 价格变化幅度控制
+                price_change = random.uniform(-0.003, 0.003)  # 0.3%内波动
+                current_price = max(low_price, min(high_price, current_price * (1 + price_change)))
+                
+                volume = random.randint(100, 5000)
+                avg_price = (current_price + pre_close) / 2
+                
+                intraday_data.append({
+                    'time': time_point.strftime('%H:%M'),
+                    'price': round(current_price, 2),
+                    'volume': volume,
+                    'avg_price': round(avg_price, 2),
+                    'change': round(current_price - pre_close, 2),
+                    'pct_change': round((current_price - pre_close) / pre_close * 100, 2)
+                })
+            
+            return {
+                'success': True,
+                'data': {
+                    'ts_code': ts_code,
+                    'intraday_data': intraday_data,
+                    'base_info': {
+                        'current_price': float(latest_daily.close),
+                        'pre_close': pre_close,
+                        'high': float(latest_daily.high) if latest_daily.high else 0,
+                        'low': float(latest_daily.low) if latest_daily.low else 0,
+                        'change': float(latest_daily.change) if latest_daily.change else 0,
+                        'pct_chg': float(latest_daily.pct_chg) if latest_daily.pct_chg else 0,
+                        'volume': latest_daily.vol if latest_daily.vol else 0,
+                        'amount': float(latest_daily.amount) if latest_daily.amount else 0
+                    },
+                    'timestamp': datetime.now().isoformat()
+                }
+            }
+            
+        except Exception as e:
+            return {
+                'success': False,
+                'message': f'获取分时图数据失败: {str(e)}'
+            }
+    
+    @staticmethod
+    def get_realtime_tick_data(ts_code):
+        """获取实时逐笔数据"""
+        try:
+            # 在实际应用中，这里应该调用实时数据接口
+            # 目前返回模拟数据
+            import random
+            from datetime import datetime, timedelta
+            
+            # 获取基础价格
+            latest_daily = StockDaily.objects.filter(ts_code=ts_code).order_by('-trade_date').first()
+            if not latest_daily:
+                return {
+                    'success': False,
+                    'message': '未找到股票数据'
+                }
+            
+            base_price = float(latest_daily.close) if latest_daily.close else 10.0
+            
+            tick_data = []
+            current_time = datetime.now()
+            
+            for i in range(20):  # 最近20笔交易
+                trade_time = current_time - timedelta(seconds=i*3)
+                price = base_price * (1 + random.uniform(-0.01, 0.01))  # 1%内波动
+                volume = random.randint(100, 2000)
+                
+                # 判断买卖方向
+                if price > base_price:
+                    direction = 'up'
+                elif price < base_price:
+                    direction = 'down'
+                else:
+                    direction = 'equal'
+                
+                tick_data.append({
+                    'time': trade_time.strftime('%H:%M:%S'),
+                    'price': round(price, 2),
+                    'volume': volume,
+                    'direction': direction,
+                    'amount': round(price * volume, 2)
+                })
+            
+            return {
+                'success': True,
+                'data': {
+                    'ts_code': ts_code,
+                    'tick_data': tick_data,
+                    'timestamp': datetime.now().isoformat()
+                }
+            }
+            
+        except Exception as e:
+            return {
+                'success': False,
+                'message': f'获取逐笔数据失败: {str(e)}'
+            }

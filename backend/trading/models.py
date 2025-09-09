@@ -8,7 +8,7 @@ from user.models import SysUser
 
 class UserStockAccount(models.Model):
     """用户股票账户表"""
-    user = models.OneToOneField(SysUser, on_delete=models.CASCADE, verbose_name='用户')
+    user = models.OneToOneField(SysUser, on_delete=models.CASCADE, verbose_name='用户', related_name='stock_account')
     account_balance = models.DecimalField(max_digits=15, decimal_places=2, default=100000.00, verbose_name='可用资金')
     frozen_balance = models.DecimalField(max_digits=15, decimal_places=2, default=0.00, verbose_name='冻结资金')
     total_assets = models.DecimalField(max_digits=15, decimal_places=2, default=100000.00, verbose_name='总资产')

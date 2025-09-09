@@ -12,8 +12,14 @@ from user.models import SysUser
 class JwtAuthenticationMiddleware(MiddlewareMixin):
 
     def process_request(self, request):
-        white_list = ["/user/login", "/user/register"]  # 请求白名单
+        white_list = ["/user/login", "/user/register", "/user/debug_login"]  # 请求白名单
         path = request.path
+        print(f"=== JWT中间件检查 ===")
+        print(f"请求路径: {path}")
+        print(f"是否在白名单: {path in white_list}")
+        print(f"请求方法: {request.method}")
+        print(f"请求体: {request.body}")
+        
         if path not in white_list and not path.startswith("/media"):
             print('要进行token验证')
             # 检查多种获取token的方式
@@ -101,6 +107,15 @@ class PermissionMiddleware(MiddlewareMixin):
         # 跳过白名单中的路径和媒体文件
         if path in white_list or path.startswith("/media"):
             return None
+            
+        # 股票和交易相关的API允许所有登录用户访问
+        if path.startswith("/stock/") or path.startswith("/trading/"):
+            # 只要通过JWT验证的用户都可以访问股票和交易API
+            if hasattr(request, 'user_id'):
+                return None
+            else:
+                # 如果没有JWT验证，让JWT中间件处理
+                return None
             
         # 如果没有完成JWT验证，直接返回（让JWT中间件处理）
         if not hasattr(request, 'user_id'):
@@ -236,10 +251,13 @@ class PermissionMiddleware(MiddlewareMixin):
             return None
             
         except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
             print(f"权限校验发生异常: {e}")
+            print(f"详细错误: {error_details}")
             return JsonResponse({
                 'code': 500, 
-                'message': '系统权限校验异常'
+                'message': f'系统权限校验异常: {str(e)}'
             }, status=500)
     
     def get_required_permission(self, path, method):

@@ -29,8 +29,8 @@ class SearchView(APIView):
         pageSize = int(data['pageSize'])  # 每页大小
         query = data['query']  # 查询参数
         
-        # Use db_user connection explicitly
-        with connections['db_user'].cursor() as cursor:
+        # Use default database connection (unified database)
+        with connections['default'].cursor() as cursor:
             # Count total matches
             cursor.execute(
                 "SELECT COUNT(*) FROM sys_role WHERE name LIKE %s",
