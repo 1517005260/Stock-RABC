@@ -41,6 +41,8 @@ INSTALLED_APPS = [
     'user.apps.UserConfig',
     'role.apps.RoleConfig',
     'chat.apps.ChatConfig',
+    'stock.apps.StockConfig',
+    'trading.apps.TradingConfig',
     # 'menu.apps.MenuConfig',
 ]
 

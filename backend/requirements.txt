@@ -10,3 +10,6 @@ asgiref>=3.8.1
 openai>=1.55.3
 python-dotenv==1.0.0
 httpx==0.27.2
+tushare>=1.2.89
+pandas>=1.5.0
+numpy>=1.21.0

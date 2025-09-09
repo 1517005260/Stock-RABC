@@ -24,6 +24,8 @@ urlpatterns = [
     path('user/', include('user.urls')),
     path('role/', include('role.urls')),
     path('chat/', include('chat.urls')), 
+    path('stock/', include('stock.urls')),       # 股票相关API
+    path('trading/', include('trading.urls')),   # 交易相关API
     # path('menu/', include(('menu.urls', 'menu'), namespace='menu')),
     # 配置媒体文件的路由文件
     re_path('media/(?P<path>.*)', serve, {'document_root': settings.MEDIA_ROOT}, name='media')

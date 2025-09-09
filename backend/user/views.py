@@ -1,4 +1,5 @@
 import json
+import hashlib
 from datetime import datetime
 
 from django.core.paginator import Paginator
@@ -18,13 +19,21 @@ from user.models import SysUser, SysUserSerializer
 class LoginView(APIView):
 
     def post(self, request):
-        username = request.GET.get("username")
-        password = request.GET.get("password")
+        # 从POST数据中获取用户名和密码
+        username = request.POST.get("username") or request.data.get("username")
+        password = request.POST.get("password") or request.data.get("password")
+        
+        if not username or not password:
+            return JsonResponse({'code': 400, 'info': '用户名和密码不能为空！'})
+        
         try:
-            user = SysUser.objects.get(username=username, password=password)
+            # Hash the password for comparison
+            hashed_password = hashlib.md5(password.encode()).hexdigest()
+            user = SysUser.objects.get(username=username, password=hashed_password)
             
-            # 检查用户状态，只允许正常状态（status=0）的用户登录
-            if user.status == 0:  # status=0 表示禁用，status=1 表示正常
+            # 检查用户状态，只允许正常状态的用户登录
+            # status=0 表示正常，status=1 表示停用
+            if user.status == 1:  
                 return JsonResponse({'code': 403, 'info': '账号已被禁用，请联系管理员！'})
                 
             jwt_payload_handler = api_settings.JWT_PAYLOAD_HANDLER
