@@ -159,7 +159,7 @@ def get_account_info(request):
         
         # 计算总市值
         positions = TradingService.get_user_positions(user)
-        total_market_value = sum(pos['market_value'] for pos in positions)
+        total_market_value = sum(float(pos['market_value']) for pos in positions)
         
         account_info = {
             'account_balance': float(account.account_balance),
@@ -622,8 +622,8 @@ def trading_statistics(request):
         
         # 持仓统计
         positions = TradingService.get_user_positions(user)
-        total_market_value = sum(pos['market_value'] for pos in positions)
-        total_profit_loss = sum(pos['profit_loss'] for pos in positions)
+        total_market_value = sum(float(pos['market_value']) for pos in positions)
+        total_profit_loss = sum(float(pos['profit_loss']) for pos in positions)
         
         # 账户信息
         account = TradingService.get_or_create_account(user)

@@ -393,11 +393,11 @@ class TradingService:
                 'stock_name': position.stock_name,
                 'position_shares': position.position_shares,
                 'available_shares': position.available_shares,
-                'cost_price': position.cost_price,
-                'current_price': position.current_price,
-                'profit_loss': profit_loss,
-                'profit_loss_ratio': profit_loss_ratio,
-                'market_value': position.current_price * position.position_shares,
+                'cost_price': float(position.cost_price),
+                'current_price': float(position.current_price),
+                'profit_loss': float(profit_loss),
+                'profit_loss_ratio': float(profit_loss_ratio),
+                'market_value': float(position.current_price * position.position_shares),
             })
         
         return result
