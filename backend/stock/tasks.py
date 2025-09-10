@@ -27,11 +27,14 @@ from bs4 import BeautifulSoup
 load_dotenv()
 
 # 配置日志
+log_file = os.path.join(BASE_DIR, 'logs', 'stock_tasks.log')
+os.makedirs(os.path.dirname(log_file), exist_ok=True)
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('/tmp/stock_tasks.log'),
+        logging.FileHandler(log_file, encoding='utf-8'),
         logging.StreamHandler()
     ]
 )
@@ -204,9 +207,13 @@ def sync_financial_news():
         # 方法1：从新浪财经爬取新闻
         news_list = crawl_sina_finance_news()
         
-        # 方法2：从东方财富爬取新闻（备用）
+        # 方法2：从东方财富爬取新闻（如果新浪失败）
         if not news_list:
             news_list = crawl_eastmoney_news()
+        
+        # 方法3：使用Bing搜索作为最后备用方案
+        if not news_list:
+            news_list = crawl_bing_finance_news()
         
         # 保存新闻到数据库
         for news in news_list:
@@ -236,89 +243,215 @@ def sync_financial_news():
 
 
 def crawl_sina_finance_news():
-    """从新浪财经爬取新闻"""
+    """从新浪财经爬取真实新闻"""
     try:
-        url = "https://finance.sina.com.cn/roll/"
+        url = "https://feed.mix.sina.com.cn/api/roll/get"
+        params = {
+            'pageid': '153',  # 财经新闻频道
+            'lid': '1686',    # 股市新闻
+            'num': '10',      # 获取10条
+            'versionNumber': '1.2.4',
+            'page': '1'
+        }
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Referer': 'https://finance.sina.com.cn/'
         }
         
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, params=params, headers=headers, timeout=10)
         response.encoding = 'utf-8'
         
         if response.status_code == 200:
-            soup = BeautifulSoup(response.text, 'html.parser')
-            news_items = soup.find_all('li', class_='clearfix')
-            
-            news_list = []
-            for item in news_items[:10]:  # 获取前10条新闻
-                try:
-                    link = item.find('a')
-                    if link:
-                        title = link.get('title') or link.text.strip()
-                        href = link.get('href')
-                        
-                        # 获取发布时间
-                        time_span = item.find('span', class_='time')
-                        publish_time = datetime.now()
-                        if time_span:
-                            try:
-                                time_str = time_span.text.strip()
-                                # 简单的时间解析，实际项目中需要更完善的解析
-                                if '今天' in time_str or '小时前' in time_str or '分钟前' in time_str:
-                                    publish_time = datetime.now()
-                                else:
-                                    # 可以添加更复杂的时间解析逻辑
+            try:
+                data = response.json()
+                if data.get('result', {}).get('status', {}).get('code') == 0:
+                    news_list = []
+                    articles = data.get('result', {}).get('data', [])
+                    
+                    for article in articles[:10]:  # 取前10条
+                        try:
+                            title = article.get('title', '').strip()
+                            url_link = article.get('url', '')
+                            create_date = article.get('create_date', '')
+                            
+                            # 解析时间
+                            publish_time = datetime.now()
+                            if create_date:
+                                try:
+                                    publish_time = datetime.strptime(create_date, '%Y-%m-%d %H:%M:%S')
+                                except:
                                     pass
-                            except:
-                                pass
-                        
-                        if title and len(title) > 5:  # 过滤掉太短的标题
-                            news_list.append({
-                                'title': title,
-                                'content': title,  # 简化版本，实际可以爬取详细内容
-                                'source': '新浪财经',
-                                'publish_time': publish_time,
-                                'related_stocks': []
-                            })
-                except Exception as e:
-                    logger.error(f"解析新闻项失败: {e}")
-                    continue
-            
-            return news_list
+                            
+                            if title and len(title) > 5:  # 过滤太短的标题
+                                news_list.append({
+                                    'title': title,
+                                    'content': title,  # 简化版本，可以进一步获取正文
+                                    'source': '新浪财经',
+                                    'publish_time': publish_time,
+                                    'url': url_link,
+                                    'related_stocks': []
+                                })
+                        except Exception as e:
+                            logger.error(f"解析新闻项失败: {e}")
+                            continue
+                    
+                    return news_list
+                else:
+                    logger.error(f"新浪财经API返回错误: {data}")
+            except json.JSONDecodeError:
+                logger.error("新浪财经返回数据不是有效JSON")
+        else:
+            logger.error(f"访问新浪财经失败: HTTP {response.status_code}")
             
     except Exception as e:
         logger.error(f"爬取新浪财经新闻失败: {e}")
-        return []
+    
+    return []
 
 
 def crawl_eastmoney_news():
-    """从东方财富爬取新闻（备用方案）"""
+    """从东方财富easyfinance爬取真实新闻数据"""
     try:
-        # 创建一些模拟新闻作为示例
-        current_time = datetime.now()
-        sample_news = [
-            {
-                'title': f'股市要闻：{current_time.strftime("%Y-%m-%d")}市场概况',
-                'content': '今日股市整体表现平稳，主要指数小幅波动。投资者关注宏观经济数据和政策动向。',
-                'source': '东方财富',
-                'publish_time': current_time,
-                'related_stocks': []
-            },
-            {
-                'title': f'市场分析：{current_time.strftime("%Y-%m-%d")}热点板块点评',
-                'content': '科技股和消费股表现活跃，新能源板块继续受到资金关注。',
-                'source': '东方财富',
-                'publish_time': current_time - timedelta(hours=1),
-                'related_stocks': []
-            }
-        ]
+        # 使用东方财富的easyfinance新闻接口
+        url = "https://np-anotice-stock.eastmoney.com/api/security/ann"
+        params = {
+            'sr': -1,
+            'page': 1,
+            'pagesize': 10,
+            'ann_type': 'A',
+            'client': 'web'
+        }
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Referer': 'https://data.eastmoney.com/',
+            'Accept': 'application/json'
+        }
         
-        return sample_news
+        response = requests.get(url, params=params, headers=headers, timeout=15)
+        
+        if response.status_code == 200:
+            try:
+                data = response.json()
+                news_list = []
+                
+                # 尝试不同的数据结构
+                announcements = data.get('data', []) or data.get('result', []) or []
+                
+                if announcements:
+                    for ann in announcements[:10]:
+                        try:
+                            title = ann.get('title', '').strip()
+                            code = ann.get('code', '') or ann.get('secucode', '')
+                            name = ann.get('name', '') or ann.get('secuname', '')
+                            notice_date = ann.get('notice_date', '') or ann.get('ann_date', '')
+                            
+                            # 构建完整标题
+                            if name and code:
+                                full_title = f"{name}({code}): {title}"
+                            else:
+                                full_title = title
+                            
+                            # 解析时间
+                            publish_time = datetime.now()
+                            if notice_date:
+                                try:
+                                    if ' ' in notice_date:
+                                        publish_time = datetime.strptime(notice_date.split(' ')[0], '%Y-%m-%d')
+                                    else:
+                                        publish_time = datetime.strptime(notice_date, '%Y-%m-%d')
+                                except:
+                                    pass
+                            
+                            if full_title and len(full_title) > 5:
+                                news_list.append({
+                                    'title': full_title,
+                                    'content': full_title,
+                                    'source': '东方财富',
+                                    'publish_time': publish_time,
+                                    'related_stocks': [code] if code else []
+                                })
+                        except Exception as e:
+                            logger.error(f"解析东方财富公告失败: {e}")
+                            continue
+                else:
+                    logger.warning("东方财富API返回数据为空")
+                
+                return news_list
+                
+            except json.JSONDecodeError:
+                logger.error("东方财富返回数据不是有效JSON")
+        else:
+            logger.error(f"访问东方财富失败: HTTP {response.status_code}")
+            logger.error(f"响应内容: {response.text[:200]}")
+        
+        return []
         
     except Exception as e:
         logger.error(f"爬取东方财富新闻失败: {e}")
         return []
+
+
+def crawl_bing_finance_news():
+    """使用Bing搜索获取财经新闻作为备用方案"""
+    try:
+        # 使用Bing搜索最新财经新闻
+        search_query = "A股市场 股票 财经新闻"
+        url = "https://www.bing.com/search"
+        params = {
+            'q': search_query,
+            'count': 10,
+            'offset': 0,
+            'mkt': 'zh-CN'
+        }
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'zh-CN,zh;q=0.8,en-US;q=0.5,en;q=0.3',
+            'Accept-Encoding': 'gzip, deflate'
+        }
+        
+        response = requests.get(url, params=params, headers=headers, timeout=15)
+        
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            news_list = []
+            
+            # 解析Bing搜索结果
+            search_results = soup.find_all('div', class_='b_algo')
+            
+            for result in search_results[:10]:
+                try:
+                    title_element = result.find('h2')
+                    if title_element:
+                        title_link = title_element.find('a')
+                        if title_link:
+                            title = title_link.get_text().strip()
+                            url_link = title_link.get('href', '')
+                            
+                            # 过滤非财经相关的结果
+                            if any(keyword in title for keyword in ['股票', '股市', 'A股', '财经', '证券', '投资', '市场']):
+                                if title and len(title) > 5:
+                                    news_list.append({
+                                        'title': title,
+                                        'content': title,
+                                        'source': 'Bing搜索',
+                                        'publish_time': datetime.now(),
+                                        'url': url_link,
+                                        'related_stocks': []
+                                    })
+                except Exception as e:
+                    logger.error(f"解析Bing搜索结果失败: {e}")
+                    continue
+            
+            return news_list
+            
+        else:
+            logger.error(f"Bing搜索失败: HTTP {response.status_code}")
+            
+    except Exception as e:
+        logger.error(f"Bing搜索新闻失败: {e}")
+    
+    return []
 
 
 def cleanup_old_data():

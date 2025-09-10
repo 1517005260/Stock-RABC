@@ -113,7 +113,7 @@ class StockDataService:
                 )
                 success_count += 1
             
-            return {'success': True, 'count': success_count}
+            return {'success': True, 'count': success_count, 'message': f'成功同步{ts_code} {success_count}条日线数据'}
         
         except Exception as e:
             return {'success': False, 'message': f'同步{ts_code}日线数据失败: {str(e)}'}
@@ -156,7 +156,7 @@ class StockDataService:
                 )
                 success_count += 1
             
-            return {'success': True, 'count': success_count}
+            return {'success': True, 'count': success_count, 'message': f'成功同步{len(ts_codes)}只股票的公司信息'}
         
         except Exception as e:
             return {'success': False, 'message': f'同步公司信息失败: {str(e)}'}
@@ -710,9 +710,9 @@ class RealTimeDataService:
     
     @staticmethod
     def get_intraday_chart_data(ts_code):
-        """获取分时图数据 - 支持5秒刷新的分时数据"""
+        """获取分时图数据 - 使用Tushare真实数据"""
         try:
-            # 简化版分时数据，基于最新日线数据模拟
+            # 获取最新日线数据作为基础信息
             latest_daily = StockDaily.objects.filter(ts_code=ts_code).order_by('-trade_date').first()
             if not latest_daily:
                 return {
@@ -720,61 +720,49 @@ class RealTimeDataService:
                     'message': '未找到股票数据'
                 }
             
-            # 模拟分时数据点（实际项目中应该获取真实分时数据）
-            import random
-            from datetime import datetime, timedelta, time as dt_time
-            
-            base_price = float(latest_daily.close)
-            pre_close = float(latest_daily.pre_close) if latest_daily.pre_close else base_price
+            # 尝试获取真实的分时数据
             intraday_data = []
-            
-            # 生成9:30到15:00的分时数据点
-            start_time = datetime.now().replace(hour=9, minute=30, second=0, microsecond=0)
-            current_price = base_price
-            
-            for i in range(0, 330, 1):  # 每1分钟一个数据点
-                time_point = start_time + timedelta(minutes=i)
+            try:
+                if pro and RealTimeDataService.is_trading_time():
+                    # 使用Tushare获取分时数据（需要高级权限）
+                    # 注意：分时数据接口需要较高权限，可能无法获取到
+                    today = datetime.now().strftime('%Y%m%d')
+                    df = pro.stk_mins(ts_code=ts_code, freq='1min', trade_date=today)
+                    
+                    if not df.empty:
+                        for _, row in df.iterrows():
+                            intraday_data.append({
+                                'time': datetime.strptime(str(row['trade_time']), '%Y%m%d %H%M%S').strftime('%H:%M'),
+                                'price': float(row['close']) if row['close'] else 0,
+                                'volume': int(row['vol']) if row['vol'] else 0,
+                                'amount': float(row['amount']) if row['amount'] else 0,
+                                'change': float(row['close'] - latest_daily.pre_close) if row['close'] and latest_daily.pre_close else 0,
+                                'pct_change': float((row['close'] - latest_daily.pre_close) / latest_daily.pre_close * 100) if row['close'] and latest_daily.pre_close else 0
+                            })
                 
-                # 跳过11:30-13:00的休市时间
-                if dt_time(11, 30) < time_point.time() < dt_time(13, 0):
-                    continue
-                
-                # 在当日价格范围内随机波动
-                high_price = float(latest_daily.high) if latest_daily.high else base_price * 1.02
-                low_price = float(latest_daily.low) if latest_daily.low else base_price * 0.98
-                
-                # 价格变化幅度控制
-                price_change = random.uniform(-0.003, 0.003)  # 0.3%内波动
-                current_price = max(low_price, min(high_price, current_price * (1 + price_change)))
-                
-                volume = random.randint(100, 5000)
-                avg_price = (current_price + pre_close) / 2
-                
-                intraday_data.append({
-                    'time': time_point.strftime('%H:%M'),
-                    'price': round(current_price, 2),
-                    'volume': volume,
-                    'avg_price': round(avg_price, 2),
-                    'change': round(current_price - pre_close, 2),
-                    'pct_change': round((current_price - pre_close) / pre_close * 100, 2)
-                })
+            except Exception as e:
+                print(f"获取Tushare分时数据失败: {e}")
+                # 如果无法获取真实分时数据，则不提供分时数据，只提供基础信息
             
             return {
                 'success': True,
                 'data': {
                     'ts_code': ts_code,
-                    'intraday_data': intraday_data,
+                    'intraday_data': intraday_data,  # 如果获取失败则为空列表
                     'base_info': {
-                        'current_price': float(latest_daily.close),
-                        'pre_close': pre_close,
+                        'current_price': float(latest_daily.close) if latest_daily.close else 0,
+                        'pre_close': float(latest_daily.pre_close) if latest_daily.pre_close else 0,
                         'high': float(latest_daily.high) if latest_daily.high else 0,
                         'low': float(latest_daily.low) if latest_daily.low else 0,
                         'change': float(latest_daily.change) if latest_daily.change else 0,
                         'pct_chg': float(latest_daily.pct_chg) if latest_daily.pct_chg else 0,
                         'volume': latest_daily.vol if latest_daily.vol else 0,
-                        'amount': float(latest_daily.amount) if latest_daily.amount else 0
+                        'amount': float(latest_daily.amount) if latest_daily.amount else 0,
+                        'trade_date': latest_daily.trade_date.strftime('%Y-%m-%d')
                     },
-                    'timestamp': datetime.now().isoformat()
+                    'timestamp': datetime.now().isoformat(),
+                    'data_source': 'tushare_realtime' if intraday_data else 'database_daily',
+                    'message': f'分时数据点数量: {len(intraday_data)}' if intraday_data else '当前非交易时间或无分时数据权限，显示最新日线数据'
                 }
             }
             
@@ -786,14 +774,9 @@ class RealTimeDataService:
     
     @staticmethod
     def get_realtime_tick_data(ts_code):
-        """获取实时逐笔数据"""
+        """获取实时逐笔数据 - 使用Tushare真实数据"""
         try:
-            # 在实际应用中，这里应该调用实时数据接口
-            # 目前返回模拟数据
-            import random
-            from datetime import datetime, timedelta
-            
-            # 获取基础价格
+            # 获取最新股票数据作为基础信息
             latest_daily = StockDaily.objects.filter(ts_code=ts_code).order_by('-trade_date').first()
             if not latest_daily:
                 return {
@@ -801,38 +784,52 @@ class RealTimeDataService:
                     'message': '未找到股票数据'
                 }
             
-            base_price = float(latest_daily.close) if latest_daily.close else 10.0
-            
+            # 尝试获取真实逐笔数据
             tick_data = []
-            current_time = datetime.now()
+            try:
+                if pro and RealTimeDataService.is_trading_time():
+                    # 使用Tushare获取逐笔数据（需要高级权限）
+                    today = datetime.now().strftime('%Y%m%d')
+                    
+                    # 注意：逐笔数据接口需要很高的权限等级，大部分用户无法访问
+                    # 这里尝试调用，如果失败则回退到基础信息
+                    df = pro.stk_ticks(ts_code=ts_code, trade_date=today)
+                    
+                    if not df.empty:
+                        # 取最新的20条逐笔数据
+                        recent_ticks = df.head(20)
+                        for _, row in recent_ticks.iterrows():
+                            tick_data.append({
+                                'time': datetime.strptime(str(row['trade_time']), '%Y%m%d %H%M%S').strftime('%H:%M:%S'),
+                                'price': float(row['price']) if row['price'] else 0,
+                                'volume': int(row['vol']) if row['vol'] else 0,
+                                'amount': float(row['amount']) if row['amount'] else 0,
+                                'bs_flag': row['bs_flag'] if 'bs_flag' in row else 'N',  # 买卖标识
+                                'change': float(row['change']) if 'change' in row and row['change'] else 0
+                            })
+                
+            except Exception as e:
+                print(f"获取Tushare逐笔数据失败: {e}")
+                # 逐笔数据获取失败是正常的，因为需要很高权限
             
-            for i in range(20):  # 最近20笔交易
-                trade_time = current_time - timedelta(seconds=i*3)
-                price = base_price * (1 + random.uniform(-0.01, 0.01))  # 1%内波动
-                volume = random.randint(100, 2000)
-                
-                # 判断买卖方向
-                if price > base_price:
-                    direction = 'up'
-                elif price < base_price:
-                    direction = 'down'
-                else:
-                    direction = 'equal'
-                
-                tick_data.append({
-                    'time': trade_time.strftime('%H:%M:%S'),
-                    'price': round(price, 2),
-                    'volume': volume,
-                    'direction': direction,
-                    'amount': round(price * volume, 2)
-                })
+            base_price = float(latest_daily.close) if latest_daily.close else 0
             
             return {
                 'success': True,
                 'data': {
                     'ts_code': ts_code,
-                    'tick_data': tick_data,
-                    'timestamp': datetime.now().isoformat()
+                    'tick_data': tick_data,  # 如果获取失败则为空列表
+                    'base_info': {
+                        'current_price': base_price,
+                        'latest_trade_date': latest_daily.trade_date.strftime('%Y-%m-%d'),
+                        'volume': latest_daily.vol if latest_daily.vol else 0,
+                        'amount': float(latest_daily.amount) if latest_daily.amount else 0,
+                        'change': float(latest_daily.change) if latest_daily.change else 0,
+                        'pct_chg': float(latest_daily.pct_chg) if latest_daily.pct_chg else 0
+                    },
+                    'timestamp': datetime.now().isoformat(),
+                    'data_source': 'tushare_ticks' if tick_data else 'database_daily',
+                    'message': f'逐笔数据条数: {len(tick_data)}' if tick_data else '当前非交易时间或无逐笔数据权限，显示基础股票信息'
                 }
             }
             

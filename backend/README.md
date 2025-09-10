@@ -283,6 +283,480 @@ class TradeRecord(models.Model):
     trade_time = models.DateTimeField(auto_now_add=True)
 ```
 
+## 🚀 快速开始与API测试
+
+### 启动服务器
+
+```bash
+# 启动HTTP服务器
+python manage.py runserver
+
+# 或启动支持WebSocket的ASGI服务器
+pip install daphne
+daphne -p 8000 app.asgi:application
+```
+
+服务器启动后，访问 `http://localhost:8000/` 即可使用API。
+
+### API测试工具
+
+我们提供了多种测试工具来验证API功能：
+
+#### 1. Python自动化测试脚本 (推荐)
+
+```bash
+# 完整测试所有API接口
+python test_api.py
+
+# 测试特定功能模块
+python test_api.py login      # 仅测试登录
+python test_api.py stock      # 测试股票相关接口
+python test_api.py trading    # 测试交易功能
+python test_api.py realtime   # 测试实时数据
+python test_api.py performance # 性能压力测试
+```
+
+#### 2. 股票走势5s异步刷新测试页面
+
+打开浏览器访问 `test_realtime.html` 文件，可以：
+- 实时查看股票数据（每5秒自动刷新）
+- 监控API响应性能
+- 观察数据变化动画效果
+- 支持手动刷新和停止功能
+
+#### 3. Shell脚本测试 (Linux/Mac)
+
+```bash
+chmod +x test_api.sh
+./test_api.sh                # 完整测试
+./test_api.sh login          # 测试特定功能
+```
+
+#### 4. Windows批处理测试
+
+```cmd
+test_api.bat                 # 完整测试
+test_api.bat login          # 测试特定功能
+```
+
+## 📋 完整API接口文档
+
+### 🔐 用户认证接口
+
+所有接口都需要先通过用户登录获取JWT Token，然后在请求头中携带认证信息。
+
+#### 用户登录
+**用途**: 用户身份验证，获取访问令牌
+
+```http
+POST /user/login
+Content-Type: application/json
+
+{
+    "username": "python222",
+    "password": "123456"
+}
+```
+
+**响应示例**:
+```json
+{
+    "code": 200,
+    "info": "登录成功",
+    "token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+    "user": {
+        "id": 1,
+        "username": "python222",
+        "roles": "超级管理员"
+    },
+    "permissions": ["system:user:list", "system:user:edit"]
+}
+```
+
+### 📈 股票行情接口
+
+#### 获取股票列表
+**用途**: 获取股票列表，支持分页、搜索、筛选
+
+```http
+GET /stock/list/?page=1&pageSize=20&keyword=&industry=&market=
+Authorization: Bearer <token>
+```
+
+**参数说明**:
+- `page`: 页码 (默认: 1)
+- `pageSize`: 每页数量 (默认: 20, 最大: 100)
+- `keyword`: 搜索关键词 (股票名称或代码)
+- `industry`: 行业筛选
+- `market`: 市场筛选 (主板/创业板等)
+
+**响应示例**:
+```json
+{
+    "code": 200,
+    "msg": "获取成功",
+    "data": {
+        "list": [
+            {
+                "ts_code": "000001.SZ",
+                "symbol": "000001",
+                "name": "平安银行",
+                "industry": "银行",
+                "current_price": 11.75,
+                "change": 0.05,
+                "pct_chg": 0.427,
+                "volume": 860539,
+                "amount": 1009279.73,
+                "trade_date": "2025-09-09"
+            }
+        ],
+        "total": 5435,
+        "page": 1,
+        "pageSize": 20,
+        "totalPages": 272
+    }
+}
+```
+
+#### 获取股票详情
+**用途**: 获取单只股票的详细信息，包括历史数据和公司信息
+
+```http
+GET /stock/detail/{ts_code}/
+Authorization: Bearer <token>
+```
+
+**路径参数**:
+- `ts_code`: 股票代码 (如: 000001.SZ)
+
+#### 股票搜索
+**用途**: 根据关键词搜索股票
+
+```http
+GET /stock/search/?keyword={keyword}&limit=10
+Authorization: Bearer <token>
+```
+
+#### 获取行业列表
+**用途**: 获取所有可用的股票行业分类
+
+```http
+GET /stock/industries/
+Authorization: Bearer <token>
+```
+
+### ⚡ 实时数据接口 (支持5s异步刷新)
+
+#### 获取实时股票价格
+**用途**: 获取股票实时价格信息，支持高频调用
+
+```http
+GET /stock/realtime/price/{ts_code}/
+Authorization: Bearer <token>
+```
+
+**响应示例**:
+```json
+{
+    "code": 200,
+    "msg": "获取成功",
+    "data": {
+        "ts_code": "000001.SZ",
+        "current_price": 11.75,
+        "change": 0.05,
+        "pct_chg": 0.427,
+        "volume": 860539,
+        "timestamp": "2025-09-10T12:23:40.521440",
+        "is_real_time": true
+    }
+}
+```
+
+#### 获取分时图数据
+**用途**: 获取股票分时走势图数据
+
+```http
+GET /stock/realtime/chart/{ts_code}/
+Authorization: Bearer <token>
+```
+
+#### 获取市场概况
+**用途**: 获取整体市场状况，包括指数、涨跌统计等
+
+```http
+GET /stock/market/overview/
+Authorization: Bearer <token>
+```
+
+### 💰 交易功能接口
+
+#### 获取用户账户信息
+**用途**: 查看用户的股票账户资金状况
+
+```http
+GET /trading/account/
+Authorization: Bearer <token>
+```
+
+**响应示例**:
+```json
+{
+    "code": 200,
+    "msg": "获取成功",
+    "data": {
+        "account_balance": 989495.0,
+        "frozen_balance": 0.0,
+        "total_assets": 1000000.0,
+        "total_profit": 10505.0,
+        "market_value": 11750,
+        "position_count": 1
+    }
+}
+```
+
+#### 股票买入
+**用途**: 购买股票
+
+```http
+POST /trading/buy/
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+    "ts_code": "000001.SZ",
+    "price": 11.50,
+    "shares": 100
+}
+```
+
+#### 股票卖出
+**用途**: 出售持有的股票
+
+```http
+POST /trading/sell/
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+    "ts_code": "000001.SZ",
+    "price": 11.60,
+    "shares": 50
+}
+```
+
+#### 查看持仓
+**用途**: 查看用户当前持有的所有股票
+
+```http
+GET /trading/positions/
+Authorization: Bearer <token>
+```
+
+#### 查看交易记录
+**用途**: 查看历史交易记录
+
+```http
+GET /trading/records/?page=1&pageSize=20
+Authorization: Bearer <token>
+```
+
+### 📊 K线图和技术分析接口
+
+#### 获取K线数据
+**用途**: 获取股票K线图数据，支持日K、周K、月K
+
+```http
+GET /stock/kline/{ts_code}/?period=daily&limit=100&adjust=qfq
+Authorization: Bearer <token>
+```
+
+**参数说明**:
+- `period`: 周期类型 (daily/weekly/monthly)
+- `limit`: 数据条数 (最大500)
+- `adjust`: 复权类型 (qfq前复权/hfq后复权/none不复权)
+
+#### 获取技术分析指标
+**用途**: 获取技术分析指标数据 (MACD、RSI、BOLL等)
+
+```http
+GET /stock/technical/{ts_code}/
+Authorization: Bearer <token>
+```
+
+### 📰 新闻资讯接口
+
+#### 获取最新新闻
+**用途**: 获取最新的财经新闻
+
+```http
+GET /stock/news/latest/?limit=10&category=市场动态
+Authorization: Bearer <token>
+```
+
+#### 创建新闻 (管理员权限)
+**用途**: 发布新的财经新闻
+
+```http
+POST /stock/news/create/
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+    "title": "新闻标题",
+    "content": "新闻内容",
+    "source": "新闻来源",
+    "category": "新闻分类",
+    "related_stocks": ["000001.SZ", "000002.SZ"]
+}
+```
+
+### 🔄 数据同步接口 (超级管理员权限)
+
+#### 同步股票基本信息
+**用途**: 从Tushare同步最新的股票基本信息
+
+```http
+POST /stock/sync/
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+    "type": "basic"
+}
+```
+
+#### 同步股票日线数据
+**用途**: 同步指定股票的历史交易数据
+
+```http
+POST /stock/sync/
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+    "type": "daily",
+    "ts_code": "000001.SZ",
+    "days": 30
+}
+```
+
+#### 同步公司信息
+**用途**: 同步上市公司基本信息
+
+```http
+POST /stock/sync/
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+    "type": "company",
+    "ts_codes": ["000001.SZ", "000002.SZ"]
+}
+```
+
+## 🧪 API使用示例
+
+### 1. 基础工作流程
+
+```bash
+# 1. 登录获取Token
+curl -X POST "http://localhost:8000/user/login" \
+  -H "Content-Type: application/json" \
+  -d '{"username": "python222", "password": "123456"}'
+
+# 2. 使用Token访问股票列表
+curl -X GET "http://localhost:8000/stock/list/?pageSize=10" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# 3. 查看股票详情
+curl -X GET "http://localhost:8000/stock/detail/000001.SZ/" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# 4. 买入股票
+curl -X POST "http://localhost:8000/trading/buy/" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"ts_code": "000001.SZ", "price": 11.50, "shares": 100}'
+```
+
+### 2. 实时数据刷新示例
+
+```javascript
+// 每5秒获取最新股票数据
+setInterval(async () => {
+    const response = await fetch('http://localhost:8000/stock/list/?pageSize=8', {
+        headers: {
+            'Authorization': `Bearer ${token}`
+        }
+    });
+    const data = await response.json();
+    console.log('最新股票数据:', data);
+}, 5000);
+```
+
+### 3. WebSocket实时推送
+
+```javascript
+// 连接WebSocket获取实时数据推送
+const ws = new WebSocket(`ws://localhost:8000/ws/stock/realtime/general/?token=${token}`);
+
+ws.onmessage = function(event) {
+    const data = JSON.parse(event.data);
+    switch(data.type) {
+        case 'market_data':
+            console.log('市场数据:', data.data);
+            break;
+        case 'realtime_data':
+            console.log('实时股价:', data.data);
+            break;
+    }
+};
+
+// 订阅特定股票
+ws.send(JSON.stringify({
+    type: 'subscribe',
+    ts_codes: ['000001.SZ', '000002.SZ']
+}));
+```
+
+## 🔍 错误处理
+
+API返回的错误响应格式统一如下：
+
+```json
+{
+    "code": 400,
+    "msg": "错误描述信息",
+    "data": null
+}
+```
+
+常见错误码：
+- `200`: 成功
+- `400`: 请求参数错误
+- `401`: 未认证或Token无效
+- `403`: 权限不足
+- `404`: 资源不存在
+- `500`: 服务器内部错误
+
+## ⚙️ API 配置说明
+
+### 认证方式
+- 使用JWT Bearer Token认证
+- Token有效期: 30天
+- 需要在请求头中携带: `Authorization: Bearer <token>`
+
+### 请求限制
+- 单个API请求超时时间: 30秒
+- 批量查询限制: 最多100条记录
+- 数据同步接口仅超级管理员可用
+
+### 数据更新频率
+- 股票基本信息: 每日更新
+- 股票价格数据: 实时更新 (交易时间内)
+- 新闻数据: 每小时更新
+- 技术指标: 随价格数据实时计算
+
 ## API 接口文档
 
 ### 用户认证接口
