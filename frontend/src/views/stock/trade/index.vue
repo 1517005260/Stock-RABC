@@ -1,0 +1,658 @@
+<template>
+  <div class="app-container">
+    <el-card v-loading="loading">
+      <!-- 返回按钮 -->
+      <div class="header-actions">
+        <el-button @click="goBack">
+          <el-icon><ArrowLeft /></el-icon>
+          返回
+        </el-button>
+      </div>
+
+      <!-- 股票信息 -->
+      <div class="stock-header" v-if="stockDetail">
+        <h2>{{ stockDetail.name }} ({{ stockDetail.symbol }})</h2>
+        <div class="price-display">
+          <span class="current-price" :class="getPriceClass(stockDetail.pct_chg)">
+            ¥{{ stockDetail.current_price || '--' }}
+          </span>
+          <span class="change-info" :class="getPriceClass(stockDetail.pct_chg)">
+            {{ formatChange(stockDetail.change) }} ({{ formatPercent(stockDetail.pct_chg) }})
+          </span>
+        </div>
+      </div>
+
+      <el-row :gutter="20" style="margin-top: 20px;">
+        <!-- 交易操作区 -->
+        <el-col :span="8">
+          <el-card title="股票交易">
+            <el-tabs v-model="activeTab" @tab-change="handleTabChange">
+              <el-tab-pane label="买入" name="buy">
+                <el-form ref="buyForm" :model="buyForm" :rules="tradeRules" label-width="80px">
+                  <el-form-item label="买入价格" prop="price">
+                    <el-input-number
+                      v-model="buyForm.price"
+                      :precision="2"
+                      :step="0.01"
+                      :min="0"
+                      style="width: 100%"
+                      placeholder="请输入买入价格"
+                    />
+                  </el-form-item>
+                  <el-form-item label="买入数量" prop="quantity">
+                    <el-input-number
+                      v-model="buyForm.quantity"
+                      :min="100"
+                      :step="100"
+                      style="width: 100%"
+                      placeholder="请输入买入数量(手)"
+                    />
+                    <div class="tip">* 最小交易单位：100股(1手)</div>
+                  </el-form-item>
+                  <el-form-item label="交易金额">
+                    <div class="amount-display">
+                      ¥{{ calculateAmount(buyForm.price, buyForm.quantity) }}
+                    </div>
+                  </el-form-item>
+                  <el-form-item label="可用资金">
+                    <div class="balance-display">
+                      ¥{{ userBalance.toLocaleString() }}
+                    </div>
+                  </el-form-item>
+                  <el-form-item>
+                    <el-button
+                      type="danger"
+                      style="width: 100%"
+                      @click="submitTrade('buy')"
+                      :disabled="!canBuy"
+                    >
+                      买入
+                    </el-button>
+                  </el-form-item>
+                </el-form>
+              </el-tab-pane>
+
+              <el-tab-pane label="卖出" name="sell">
+                <el-form ref="sellForm" :model="sellForm" :rules="tradeRules" label-width="80px">
+                  <el-form-item label="卖出价格" prop="price">
+                    <el-input-number
+                      v-model="sellForm.price"
+                      :precision="2"
+                      :step="0.01"
+                      :min="0"
+                      style="width: 100%"
+                      placeholder="请输入卖出价格"
+                    />
+                  </el-form-item>
+                  <el-form-item label="卖出数量" prop="quantity">
+                    <el-input-number
+                      v-model="sellForm.quantity"
+                      :min="100"
+                      :step="100"
+                      :max="holdingQuantity"
+                      style="width: 100%"
+                      placeholder="请输入卖出数量(手)"
+                    />
+                    <div class="tip">* 可卖数量：{{ holdingQuantity }}手</div>
+                  </el-form-item>
+                  <el-form-item label="交易金额">
+                    <div class="amount-display">
+                      ¥{{ calculateAmount(sellForm.price, sellForm.quantity) }}
+                    </div>
+                  </el-form-item>
+                  <el-form-item label="持有数量">
+                    <div class="holding-display">
+                      {{ holdingQuantity }}手 ({{ holdingQuantity * 100 }}股)
+                    </div>
+                  </el-form-item>
+                  <el-form-item>
+                    <el-button
+                      type="success"
+                      style="width: 100%"
+                      @click="submitTrade('sell')"
+                      :disabled="!canSell"
+                    >
+                      卖出
+                    </el-button>
+                  </el-form-item>
+                </el-form>
+              </el-tab-pane>
+            </el-tabs>
+
+            <!-- 快速操作按钮 -->
+            <div class="quick-actions">
+              <el-button-group>
+                <el-button size="small" @click="setPrice('current')">现价</el-button>
+                <el-button size="small" @click="setPrice('buy5')">买五价</el-button>
+                <el-button size="small" @click="setPrice('sell5')">卖五价</el-button>
+              </el-button-group>
+            </div>
+          </el-card>
+        </el-col>
+
+        <!-- 盘口数据 -->
+        <el-col :span="8">
+          <el-card title="买卖盘口">
+            <div class="order-book" v-loading="orderBookLoading">
+              <div class="sell-orders">
+                <div class="order-item" v-for="i in 5" :key="'sell' + i">
+                  <span class="level">卖{{ i }}</span>
+                  <span class="price sell-price">{{ getSellPrice(i) }}</span>
+                  <span class="volume">{{ getSellVolume(i) }}</span>
+                </div>
+              </div>
+              <div class="current-price-line">
+                <span class="current-price" :class="getPriceClass(stockDetail?.pct_chg)">
+                  {{ stockDetail?.current_price || '--' }}
+                </span>
+              </div>
+              <div class="buy-orders">
+                <div class="order-item" v-for="i in 5" :key="'buy' + i">
+                  <span class="level">买{{ i }}</span>
+                  <span class="price buy-price">{{ getBuyPrice(i) }}</span>
+                  <span class="volume">{{ getBuyVolume(i) }}</span>
+                </div>
+              </div>
+            </div>
+          </el-card>
+        </el-col>
+
+        <!-- 分时图 -->
+        <el-col :span="8">
+          <el-card title="分时走势">
+            <v-chart
+              class="mini-chart"
+              :option="miniChartOption"
+              :loading="chartLoading"
+              autoresize
+            />
+          </el-card>
+        </el-col>
+      </el-row>
+
+      <!-- 交易记录 -->
+      <el-card title="今日交易记录" style="margin-top: 20px;">
+        <el-table :data="tradeRecords" style="width: 100%">
+          <el-table-column prop="time" label="时间" width="120" />
+          <el-table-column prop="type" label="类型" width="80">
+            <template #default="scope">
+              <el-tag :type="scope.row.type === 'buy' ? 'danger' : 'success'">
+                {{ scope.row.type === 'buy' ? '买入' : '卖出' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="price" label="成交价" width="100" />
+          <el-table-column prop="quantity" label="数量(手)" width="100" />
+          <el-table-column prop="amount" label="成交金额" width="120" />
+          <el-table-column prop="status" label="状态" width="100">
+            <template #default="scope">
+              <el-tag :type="getStatusType(scope.row.status)">
+                {{ getStatusText(scope.row.status) }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作">
+            <template #default="scope">
+              <el-button
+                v-if="scope.row.status === 'pending'"
+                type="danger"
+                size="small"
+                @click="cancelTrade(scope.row)"
+              >
+                撤单
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-card>
+    </el-card>
+  </div>
+</template>
+
+<script>
+import { use } from "echarts/core"
+import { CanvasRenderer } from "echarts/renderers"
+import { LineChart } from "echarts/charts"
+import {
+  TitleComponent,
+  TooltipComponent,
+  GridComponent
+} from "echarts/components"
+import VChart from "vue-echarts"
+import { ArrowLeft } from '@element-plus/icons-vue'
+import { getStockDetail, getStockRealtimeData, getStockIntradayChart } from '@/api/stock'
+import { getUserAssets, getUserPositions, getTradeRecords, buyStock, sellStock } from '@/api/trading'
+
+use([
+  CanvasRenderer,
+  LineChart,
+  TitleComponent,
+  TooltipComponent,
+  GridComponent
+])
+
+export default {
+  name: 'StockTrade',
+  components: {
+    VChart,
+    ArrowLeft
+  },
+  data() {
+    return {
+      loading: false,
+      orderBookLoading: false,
+      chartLoading: false,
+      activeTab: 'buy',
+      stockDetail: null,
+      orderBookData: null,
+      chartData: [],
+      userBalance: 0,
+      holdingQuantity: 0,
+      buyForm: {
+        price: null,
+        quantity: 100
+      },
+      sellForm: {
+        price: null,
+        quantity: 100
+      },
+      tradeRules: {
+        price: [
+          { required: true, message: '请输入价格', trigger: 'blur' },
+          { type: 'number', min: 0.01, message: '价格必须大于0', trigger: 'blur' }
+        ],
+        quantity: [
+          { required: true, message: '请输入数量', trigger: 'blur' },
+          { type: 'number', min: 100, message: '最小交易数量为100股', trigger: 'blur' }
+        ]
+      },
+      tradeRecords: [],
+      refreshTimer: null
+    }
+  },
+  computed: {
+    tsCode() {
+      return this.$route.params.tsCode
+    },
+    canBuy() {
+      return this.buyForm.price && this.buyForm.quantity && 
+             this.calculateAmount(this.buyForm.price, this.buyForm.quantity) <= this.userBalance
+    },
+    canSell() {
+      return this.sellForm.price && this.sellForm.quantity && 
+             this.sellForm.quantity <= this.holdingQuantity
+    },
+    miniChartOption() {
+      if (!this.chartData.length) return {}
+      
+      const times = this.chartData.map(item => item.time)
+      const prices = this.chartData.map(item => item.price)
+      
+      return {
+        grid: {
+          left: '3%',
+          right: '4%',
+          bottom: '3%',
+          top: '10%',
+          containLabel: true
+        },
+        xAxis: {
+          type: 'category',
+          boundaryGap: false,
+          data: times,
+          axisLabel: {
+            fontSize: 10
+          }
+        },
+        yAxis: {
+          type: 'value',
+          scale: true,
+          axisLabel: {
+            fontSize: 10
+          }
+        },
+        series: [
+          {
+            type: 'line',
+            data: prices,
+            smooth: true,
+            symbol: 'none',
+            lineStyle: {
+              color: '#1890ff',
+              width: 1
+            }
+          }
+        ]
+      }
+    }
+  },
+  async created() {
+    await this.getStockDetail()
+    await this.getOrderBookData()
+    await this.getChartData()
+    this.initializeForms()
+    this.loadTradeRecords()
+    this.startAutoRefresh()
+  },
+  beforeUnmount() {
+    this.stopAutoRefresh()
+  },
+  methods: {
+    async getStockDetail() {
+      this.loading = true
+      try {
+        const response = await getStockDetail(this.tsCode)
+        if (response.data.code === 200) {
+          this.stockDetail = response.data.data
+        }
+      } catch (error) {
+        this.$message.error('获取股票信息失败，请检查网络连接')
+      } finally {
+        this.loading = false
+      }
+    },
+    async getOrderBookData() {
+      this.orderBookLoading = true
+      try {
+        const response = await getStockRealtimeData(this.tsCode)
+        if (response.data.code === 200) {
+          this.orderBookData = response.data.data
+        }
+      } catch (error) {
+        console.error('获取盘口数据失败:', error)
+      } finally {
+        this.orderBookLoading = false
+      }
+    },
+    async getChartData() {
+      this.chartLoading = true
+      try {
+        const response = await getStockIntradayChart(this.tsCode)
+        if (response.data.code === 200) {
+          this.chartData = response.data.data || []
+        }
+      } catch (error) {
+        console.error('获取图表数据失败:', error)
+      } finally {
+        this.chartLoading = false
+      }
+    },
+    initializeForms() {
+      if (this.stockDetail?.current_price) {
+        this.buyForm.price = parseFloat(this.stockDetail.current_price)
+        this.sellForm.price = parseFloat(this.stockDetail.current_price)
+      }
+    },
+    loadTradeRecords() {
+      this.tradeRecords = []
+    },
+    handleTabChange() {
+      // Tab切换时的处理逻辑
+    },
+    setPrice(type) {
+      let price = 0
+      switch (type) {
+        case 'current':
+          price = parseFloat(this.stockDetail?.current_price || 0)
+          break
+        case 'buy5':
+          price = this.getBuyPrice(5, true)
+          break
+        case 'sell5':
+          price = this.getSellPrice(5, true)
+          break
+      }
+      
+      if (this.activeTab === 'buy') {
+        this.buyForm.price = price
+      } else {
+        this.sellForm.price = price
+      }
+    },
+    async submitTrade(type) {
+      const form = type === 'buy' ? this.buyForm : this.sellForm
+      const formRef = type === 'buy' ? this.$refs.buyForm : this.$refs.sellForm
+      
+      try {
+        await formRef.validate()
+        
+        // 模拟交易提交
+        const tradeData = {
+          ts_code: this.tsCode,
+          type: type,
+          price: form.price,
+          quantity: form.quantity,
+          amount: this.calculateAmount(form.price, form.quantity)
+        }
+        
+        this.$confirm(
+          `确认${type === 'buy' ? '买入' : '卖出'}${form.quantity}手，价格¥${form.price}？`,
+          '确认交易',
+          {
+            confirmButtonText: '确定',
+            cancelButtonText: '取消',
+            type: 'warning',
+          }
+        ).then(() => {
+          this.$message.success('交易委托已提交')
+        })
+      } catch (error) {
+        console.error('表单验证失败:', error)
+      }
+    },
+    cancelTrade(record) {
+      this.$confirm('确认撤销该笔交易？', '撤销交易', {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning',
+      }).then(() => {
+        record.status = 'cancelled'
+        this.$message.success('交易已撤销')
+      })
+    },
+    calculateAmount(price, quantity) {
+      if (!price || !quantity) return 0
+      return (price * quantity * 100).toFixed(2)
+    },
+    getBuyPrice(level, returnNumber = false) {
+      // 从实时数据中获取买盘价格，如果没有盘口数据则根据当前价计算估算值
+      if (this.orderBookData && this.orderBookData.buy_orders && this.orderBookData.buy_orders[level - 1]) {
+        const buyOrder = this.orderBookData.buy_orders[level - 1]
+        return returnNumber ? parseFloat(buyOrder.price) : buyOrder.price
+      }
+      
+      // 如果没有真实盘口数据，基于当前价格估算（仅用于界面显示，实际交易需要真实数据）
+      if (this.stockDetail && this.stockDetail.current_price) {
+        const basePrice = parseFloat(this.stockDetail.current_price)
+        const estimatedPrice = (basePrice - (level - 1) * 0.01).toFixed(2)
+        return returnNumber ? parseFloat(estimatedPrice) : estimatedPrice
+      }
+      
+      return returnNumber ? 0 : '--'
+    },
+    getSellPrice(level, returnNumber = false) {
+      // 从实时数据中获取卖盘价格，如果没有盘口数据则根据当前价计算估算值
+      if (this.orderBookData && this.orderBookData.sell_orders && this.orderBookData.sell_orders[level - 1]) {
+        const sellOrder = this.orderBookData.sell_orders[level - 1]
+        return returnNumber ? parseFloat(sellOrder.price) : sellOrder.price
+      }
+      
+      // 如果没有真实盘口数据，基于当前价格估算（仅用于界面显示，实际交易需要真实数据）
+      if (this.stockDetail && this.stockDetail.current_price) {
+        const basePrice = parseFloat(this.stockDetail.current_price)
+        const estimatedPrice = (basePrice + (level - 1) * 0.01).toFixed(2)
+        return returnNumber ? parseFloat(estimatedPrice) : estimatedPrice
+      }
+      
+      return returnNumber ? 0 : '--'
+    },
+    getBuyVolume(level) {
+      if (this.orderBookData && this.orderBookData.buy_orders && this.orderBookData.buy_orders[level - 1]) {
+        return this.orderBookData.buy_orders[level - 1].volume
+      }
+      return '--'
+    },
+    getSellVolume(level) {
+      if (this.orderBookData && this.orderBookData.sell_orders && this.orderBookData.sell_orders[level - 1]) {
+        return this.orderBookData.sell_orders[level - 1].volume
+      }
+      return '--'
+    },
+    getStatusType(status) {
+      const types = {
+        pending: 'warning',
+        completed: 'success',
+        cancelled: 'info'
+      }
+      return types[status] || 'info'
+    },
+    getStatusText(status) {
+      const texts = {
+        pending: '待成交',
+        completed: '已成交',
+        cancelled: '已撤销'
+      }
+      return texts[status] || '未知'
+    },
+    startAutoRefresh() {
+      this.refreshTimer = setInterval(() => {
+        this.getOrderBookData()
+        this.getChartData()
+      }, 5000)
+    },
+    stopAutoRefresh() {
+      if (this.refreshTimer) {
+        clearInterval(this.refreshTimer)
+        this.refreshTimer = null
+      }
+    },
+    goBack() {
+      this.$router.back()
+    },
+    getPriceClass(pctChg) {
+      if (!pctChg) return ''
+      return pctChg > 0 ? 'price-up' : pctChg < 0 ? 'price-down' : ''
+    },
+    formatChange(value) {
+      if (!value) return '--'
+      const formatted = parseFloat(value).toFixed(2)
+      return value > 0 ? `+${formatted}` : formatted
+    },
+    formatPercent(value) {
+      if (!value) return '--'
+      const formatted = parseFloat(value).toFixed(2)
+      return value > 0 ? `+${formatted}%` : `${formatted}%`
+    }
+  }
+}
+</script>
+
+<style scoped>
+.app-container {
+  padding: 20px;
+}
+
+.header-actions {
+  margin-bottom: 20px;
+}
+
+.stock-header {
+  text-align: center;
+  padding: 20px;
+  border-bottom: 1px solid #e8e8e8;
+}
+
+.stock-header h2 {
+  margin: 0 0 10px 0;
+  font-size: 20px;
+}
+
+.current-price {
+  font-size: 24px;
+  font-weight: bold;
+  margin-right: 15px;
+}
+
+.change-info {
+  font-size: 14px;
+}
+
+.price-up {
+  color: #dd4b39; /* AdminLTE红色 */
+}
+
+.price-down {
+  color: #00a65a; /* AdminLTE绿色 */
+}
+
+.amount-display, .balance-display, .holding-display {
+  font-size: 16px;
+  font-weight: bold;
+  color: #333;
+}
+
+.tip {
+  font-size: 12px;
+  color: #999;
+  margin-top: 5px;
+}
+
+.quick-actions {
+  text-align: center;
+  margin-top: 15px;
+}
+
+.order-book {
+  font-family: monospace;
+}
+
+.order-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+  font-size: 12px;
+}
+
+.level {
+  width: 40px;
+  color: #666;
+}
+
+.price {
+  width: 60px;
+  text-align: right;
+  font-weight: bold;
+}
+
+.buy-price {
+  color: #dd4b39; /* 买盘用红色 */
+}
+
+.sell-price {
+  color: #00a65a; /* 卖盘用绿色 */
+}
+
+.volume {
+  width: 50px;
+  text-align: right;
+  color: #666;
+}
+
+.current-price-line {
+  text-align: center;
+  padding: 8px 0;
+  border-top: 1px solid #e8e8e8;
+  border-bottom: 1px solid #e8e8e8;
+  margin: 5px 0;
+}
+
+.current-price-line .current-price {
+  font-weight: bold;
+  font-size: 14px;
+}
+
+.mini-chart {
+  width: 100%;
+  height: 200px;
+}
+</style>

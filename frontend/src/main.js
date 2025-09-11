@@ -12,6 +12,44 @@ import '@/assets/styles/border.css'
 import '@/assets/styles/reset.css'
 // 权限指令
 import permissionDirectives from '@/util/permission'
+// ECharts
+import { use } from "echarts/core"
+import { CanvasRenderer } from "echarts/renderers"
+import {
+  CandlestickChart,
+  LineChart,
+  BarChart,
+  ScatterChart,
+  PieChart
+} from "echarts/charts"
+import {
+  TitleComponent,
+  TooltipComponent,
+  LegendComponent,
+  GridComponent,
+  DataZoomComponent,
+  ToolboxComponent,
+  MarkLineComponent,
+  MarkPointComponent
+} from "echarts/components"
+
+// 注册ECharts组件
+use([
+  CanvasRenderer,
+  CandlestickChart,
+  LineChart,
+  BarChart,
+  ScatterChart,
+  PieChart,
+  TitleComponent,
+  TooltipComponent,
+  LegendComponent,
+  GridComponent,
+  DataZoomComponent,
+  ToolboxComponent,
+  MarkLineComponent,
+  MarkPointComponent
+])
 
 const app = createApp(App)
 

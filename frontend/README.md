@@ -1,639 +1,257 @@
-# Vue 3 RBAC 前端系统
+# 股票交易模拟系统 - 前端项目
 
-这是一个基于 Vue 3 和 Element Plus 的前端系统，配合 Django 后端实现的 RBAC 权限管理和 AI 聊天功能。项目采用组件化设计，使用 Vue Router 进行路由管理，Vuex 进行状态管理。
+基于 Vue3 + Element Plus 构建的股票交易模拟系统前端，集成 RBAC 权限管理、实时行情、K 线图表、模拟交易等功能。
 
 ## 技术栈
 
-- **Vue 3**: 核心框架
-- **Element Plus**: UI 组件库
-- **Vue Router 4**: 路由管理
-- **Vuex 4**: 状态管理
-- **Axios**: HTTP 请求
-- **SVG Icon**: 图标管理
-- **JS-Cookie**: Cookie 管理
+- **Vue 3.2+**: 渐进式 JavaScript 框架
+- **Element Plus 2.2+**: Vue3 UI 组件库
+- **Vue Router 4.0+**: 官方路由管理器
+- **Vuex 4.0+**: 状态管理模式
+- **ECharts 5.4+**: 专业数据可视化库
+- **Vue-ECharts 6.6+**: ECharts 的 Vue 封装
+- **Axios 1.7+**: HTTP 请求库
+- **Sass**: CSS 预处理器
+- **Moment.js**: 时间处理库
+- **Lodash**: JavaScript 实用工具库
 
 ## 功能特性
 
-- 用户登录/注销
-- 权限管理
-- 角色管理
-- 菜单管理
-- 用户管理
-- AI 聊天助手
-- 可折叠侧边栏
-- 标签页导航
+### 📈 股票交易模块
 
-## 环境要求
+- **股票首页**: 市场概览、热门股票、实时新闻、自选股管理
+- **股票列表**: 支持搜索、筛选、分页的股票列表，实时涨跌显示
+- **股票详情**: K 线图、技术指标、分时图、公司基本信息
+- **模拟交易**: 买入卖出操作、五档盘口、交易记录
 
-- **Node.js**: 14.x 或更高版本
-- **npm**: 6.x 或更高版本
+### 🔐 权限管理
 
-## 安装与启动
+- **登录认证**: JWT token 身份验证，支持记住密码
+- **路由守卫**: 基于权限的路由访问控制
+- **角色管理**: 超级管理员、管理员、普通用户三级权限
+- **权限验证**: 页面级和功能级权限控制
 
-### 克隆项目
+### 📊 数据可视化
 
-```bash
-git clone https://github.com/1517005260/Mini-RABC.git
-cd Mini-RABC/frontend
+- **K 线图表**: 日 K/周 K/月 K，支持缩放和多种技术指标
+- **分时图**: 实时价格走势，5 秒自动刷新
+- **成交量图**: 柱状图显示成交量变化
+- **技术指标**: MA、MACD、RSI、KDJ、BOLL 等专业分析工具
+- **市场概览**: 大盘指数、涨跌统计、资金流向
+
+### 🎯 用户体验
+
+- **响应式设计**: 适配 PC、平板、手机等多种设备
+- **标签页导航**: 多页面标签切换，提升工作效率
+- **实时数据**: WebSocket 推送，股票价格实时更新
+- **错误处理**: 完善的错误边界和友好提示
+
+## 项目结构
+
 ```
+src/
+├── api/                    # API接口管理
+│   └── stock.js           # 股票相关接口
+├── assets/                 # 静态资源
+│   ├── images/            # 图片资源
+│   └── styles/            # 全局样式
+├── components/            # 公共组件
+│   ├── HelloWorld.vue
+│   └── SvgIcon/           # SVG图标组件
+├── icons/                 # SVG图标集
+├── layout/                # 布局组件
+│   ├── header/            # 顶部导航
+│   ├── menu/              # 侧边菜单
+│   └── footer/            # 底部信息
+├── router/                # 路由配置
+│   └── index.js           # 路由定义和守卫
+├── store/                 # Vuex状态管理
+├── utils/                 # 工具函数
+│   └── request.js         # HTTP请求配置
+├── views/                 # 页面组件
+│   ├── index/             # 系统首页
+│   ├── stock/             # 股票模块
+│   │   ├── dashboard/     # 股票仪表板
+│   │   ├── list/          # 股票列表
+│   │   ├── detail/        # 股票详情
+│   │   └── trade/         # 股票交易
+│   ├── sys/               # 系统管理
+│   │   ├── user/          # 用户管理
+│   │   └── role/          # 角色管理
+│   ├── userCenter/        # 个人中心
+│   ├── chat/              # AI聊天
+│   ├── Login.vue          # 登录页
+│   └── Register.vue       # 注册页
+├── App.vue                # 根组件
+└── main.js                # 入口文件
+```
+
+## 安装运行
+
+### 环境要求
+
+- Node.js 16+
+- NPM 8+ 或 Yarn 1.22+
 
 ### 安装依赖
 
 ```bash
 npm install
+# 或
+yarn install
 ```
 
-如果遇到依赖问题，可以尝试：
-
-```bash
-# 安装核心依赖
-npm install @vue/cli-service
-```
-
-### 开发环境启动
+### 开发环境
 
 ```bash
 npm run serve
+# 或
+yarn serve
 ```
 
-启动成功后，访问 http://localhost:8080
+访问: http://localhost:8080
 
-### 生产环境构建
+### 生产构建
 
 ```bash
 npm run build
+# 或
+yarn build
 ```
 
-构建完成后，生成的文件将位于 `dist` 目录中，可以部署到任何静态文件服务器。
+## 主要页面
 
-## 项目结构
+### 1. 股票首页 (`/stock/dashboard`)
 
-```
-frontend/
-├── public/              # 静态资源
-├── src/
-│   ├── assets/          # 资源文件
-│   ├── components/      # 公共组件
-│   ├── icons/           # SVG图标
-│   ├── layout/          # 布局组件
-│   ├── router/          # 路由配置
-│   ├── store/           # Vuex状态管理
-│   ├── util/            # 工具函数
-│   ├── views/           # 页面视图
-│   ├── App.vue          # 根组件
-│   └── main.js          # 入口文件
-├── babel.config.js      # Babel配置
-├── package.json         # 依赖配置
-└── vue.config.js        # Vue配置
-```
+- 市场指数概览（上证、深证、创业板、科创板）
+- 热门股票排行榜，支持实时刷新
+- 最新市场新闻，点击查看详情
+- 我的自选股列表
+- 大盘走势图，支持不同周期切换
+- 涨跌分布统计和资金流向分析
+- 快捷操作入口
 
-## 实现思路与核心代码
+### 2. 股票列表 (`/stock/list`)
 
-### 1. 用户认证与权限控制
+- 分页显示所有上市股票
+- 支持按股票名称、代码搜索
+- 按行业和市场类型筛选
+- 实时显示股价、涨跌幅、成交量
+- 红绿配色显示涨跌状态
+- 点击跳转详情页或交易页
 
-用户认证采用基于 JWT 的无状态认证方式，确保系统安全和可扩展性。
+### 3. 股票详情 (`/stock/detail/:tsCode`)
 
-#### 登录实现 (`src/views/Login.vue`)
+- 股票基本信息和实时价格
+- 专业 K 线图表，支持日 K/周 K/月 K 切换
+- 技术指标计算和展示
+- 实时分时图，每 5 秒更新
+- 上市公司详细信息
+- 快速跳转交易页面
+
+### 4. 股票交易 (`/stock/trade/:tsCode`)
+
+- 买入卖出操作界面
+- 实时五档买卖盘口数据
+- 分时走势图
+- 今日交易记录查询
+- 模拟资金和持仓管理
+- 快速下单和撤单功能
+
+## API 配置
+
+后端 API 地址配置在 `src/utils/request.js`：
 
 ```javascript
-const handleLogin = () => {
-  loginRef.value.validate(async (valid) => {
-    if (valid) {
-      let result = await requestUtil.post(
-        "user/login?" + qs.stringify(loginForm.value)
-      );
-      let data = result.data;
-      if (data.code == 200) {
-        // 登录成功，存储token和用户信息
-        window.sessionStorage.setItem("token", data.token);
-        const currentUser = data.user;
-        currentUser.roles = data.roles;
-        window.sessionStorage.setItem(
-          "currentUser",
-          JSON.stringify(currentUser)
-        );
-        window.sessionStorage.setItem(
-          "menuList",
-          JSON.stringify(data.menuList)
-        );
-
-        // 记住密码功能
-        if (loginForm.value.rememberMe) {
-          Cookies.set("username", loginForm.value.username, { expires: 30 });
-          Cookies.set("password", encrypt(loginForm.value.password), {
-            expires: 30,
-          });
-          Cookies.set("rememberMe", loginForm.value.rememberMe, {
-            expires: 30,
-          });
-        }
-        router.replace("/");
-      }
-    }
-  });
-};
-```
-
-#### 请求拦截器 (`src/util/request.js`)
-
-确保每次请求自动附加 JWT Token 到请求头：
-
-```javascript
-let baseUrl = "http://localhost:8000/";
-
-// 创建axios实例
-const httpService = axios.create({
-  baseURL: baseUrl,
-  timeout: 30000,
-});
-
-// 添加请求拦截器，自动添加token
-httpService.interceptors.request.use(
-  function (config) {
-    config.headers.AUTHORIZATION = window.sessionStorage.getItem("token");
-    return config;
-  },
-  function (error) {
-    return Promise.reject(error);
-  }
-);
-
-// 添加响应拦截器
-httpService.interceptors.response.use(
-  function (response) {
-    // 当返回的状态码为401时，表示token已过期，需要重新登录
-    if (response.data.code === 401) {
-      window.sessionStorage.clear();
-      router.replace("/login");
-    }
-    return response;
-  },
-  function (error) {
-    ElMessage.error("请求失败");
-    return Promise.reject(error);
-  }
-);
-```
-
-### 2. 动态菜单与路由
-
-系统基于用户角色动态生成菜单和路由，确保用户只能访问有权限的功能。
-
-#### 动态菜单实现 (`src/layout/menu/index.vue`)
-
-```javascript
-<template>
-  <el-menu
-      active-text-color="#ffd04b"
-      background-color="#2d3a4b"
-      class="el-menu-vertical-demo"
-      text-color="#fff"
-      router
-      :default-active="activePath"
-  >
-    <el-menu-item index="/index" @click="openTab({name:'首页', path:'/index'})">
-      <el-icon><home-filled/></el-icon>
-      <span>首页</span>
-    </el-menu-item>
-    <el-sub-menu :index="menu.path" v-for="menu in menuList" :key="menu.id">
-      <template #title>
-        <el-icon><svg-icon :icon="menu.icon"/></el-icon>
-        <span>{{menu.name}}</span>
-      </template>
-      <el-menu-item 
-        :index="item.path" 
-        v-for="item in menu.children" 
-        :key="item.id"
-        @click="openTab(item)"
-      >
-        <el-icon><svg-icon :icon="item.icon"/></el-icon>
-        <span>{{item.name}}</span>
-      </el-menu-item>
-    </el-sub-menu>
-  </el-menu>
-</template>
-
-<script setup>
-import { ref, computed } from 'vue'
-import { useStore } from 'vuex'
-import { useRoute } from 'vue-router'
-
-const store = useStore()
-const route = useRoute()
-
-// 从sessionStorage获取后端返回的菜单数据
-const menuList = JSON.parse(sessionStorage.getItem("menuList") || "[]")
-
-// 激活的菜单项
-const activePath = computed(() => route.path)
-
-// 点击菜单时添加标签页
-const openTab = (item) => {
-  store.commit('ADD_TABS', {
-    title: item.name,
-    name: item.path
-  })
-}
-</script>
-```
-
-### 3. 标签页导航
-
-使用标签页形式管理多页面切换，提升用户体验和工作效率。
-
-#### Vuex 状态管理 (`src/store/index.js`)
-
-```javascript
-export default createStore({
-  state: {
-    editableTabsValue: "/index",
-    editableTabs: [
-      {
-        title: "首页",
-        name: "/index",
-      },
-    ],
-  },
-  mutations: {
-    // 添加标签页
-    ADD_TABS: (state, tab) => {
-      if (state.editableTabs.findIndex((e) => e.name === tab.name) === -1) {
-        state.editableTabs.push({
-          title: tab.title,
-          name: tab.name,
-        });
-      }
-      state.editableTabsValue = tab.name;
-    },
-    // 重置标签页
-    RESET_TABS: (state) => {
-      state.editableTabsValue = "/index";
-      state.editableTabs = [
-        {
-          title: "首页",
-          name: "/index",
-        },
-      ];
-    },
-  },
+const request = axios.create({
+  baseURL: process.env.VUE_APP_BASE_API || "http://localhost:8000/api",
+  timeout: 15000,
 });
 ```
 
-#### 标签页组件 (`src/layout/tabs/index.vue`)
+环境变量配置（.env 文件）：
 
-```javascript
-<template>
-  <el-tabs
-      v-model="editableTabsValue"
-      type="card"
-      class="demo-tabs"
-      closable
-      @tab-remove="removeTab"
-      @tab-click="clickTab"
-  >
-    <el-tab-pane
-        v-for="item in editableTabs"
-        :key="item.name"
-        :label="item.title"
-        :name="item.name"
-    />
-  </el-tabs>
-</template>
-
-<script setup>
-import { ref, computed, watch } from 'vue'
-import { useStore } from 'vuex'
-import { useRouter, useRoute } from 'vue-router'
-
-const store = useStore()
-const router = useRouter()
-const route = useRoute()
-
-// 使用计算属性从Vuex获取标签页数据
-const editableTabsValue = computed({
-  get: () => store.state.editableTabsValue,
-  set: (val) => store.state.editableTabsValue = val
-})
-const editableTabs = computed(() => store.state.editableTabs)
-
-// 监听路由变化，添加标签页
-watch(() => route.path, (newPath) => {
-  if (newPath !== '/login') {
-    store.commit('ADD_TABS', {
-      title: route.meta.title || route.name,
-      name: newPath
-    })
-  }
-}, { immediate: true })
-
-// 关闭标签页
-const removeTab = (targetName) => {
-  const tabs = [...editableTabs.value]
-  let activeName = editableTabsValue.value
-  if (activeName === targetName) {
-    tabs.forEach((tab, index) => {
-      if (tab.name === targetName) {
-        const nextTab = tabs[index + 1] || tabs[index - 1]
-        if (nextTab) {
-          activeName = nextTab.name
-        }
-      }
-    })
-  }
-  
-  editableTabsValue.value = activeName
-  store.state.editableTabs = tabs.filter(tab => tab.name !== targetName)
-  
-  // 路由跳转
-  router.push(activeName)
-}
-
-// 点击标签页
-const clickTab = (tab) => {
-  router.push(tab.props.name)
-}
-</script>
+```
+VUE_APP_BASE_API=http://localhost:8000/api
 ```
 
-### 4. RBAC 管理模块
+## 核心功能实现
 
-系统实现了完整的 RBAC 权限管理功能，包括用户、角色、菜单的管理和权限分配。
+### 权限控制
 
-#### 用户管理 (`src/views/sys/user/index.vue`)
+- JWT token 自动附加到请求头
+- 路由守卫验证用户权限
+- 基于角色的菜单动态生成
+- 页面权限和功能权限双重验证
 
-```javascript
-<template>
-  <div>
-    <!-- 搜索栏 -->
-    <el-form :inline="true" :model="searchForm" class="demo-form-inline">
-      <el-form-item label="用户名">
-        <el-input v-model="searchForm.username" placeholder="用户名" clearable />
-      </el-form-item>
-      <el-form-item>
-        <el-button type="primary" @click="handleSearch">查询</el-button>
-        <el-button type="success" @click="handleAdd">添加</el-button>
-      </el-form-item>
-    </el-form>
-    
-    <!-- 用户列表 -->
-    <el-table :data="tableData" stripe style="width: 100%">
-      <el-table-column prop="username" label="用户名" />
-      <el-table-column prop="realname" label="姓名" />
-      <el-table-column prop="email" label="邮箱" />
-      <el-table-column label="状态">
-        <template #default="scope">
-          <el-switch
-            v-model="scope.row.is_enabled"
-            @change="handleStatusChange(scope.row)"
-          />
-        </template>
-      </el-table-column>
-      <el-table-column label="操作" width="320">
-        <template #default="scope">
-          <el-button type="primary" @click="handleEdit(scope.row)">编辑</el-button>
-          <el-button type="danger" @click="handleDelete(scope.row)">删除</el-button>
-          <el-button type="warning" @click="handleResetPwd(scope.row)">重置密码</el-button>
-          <el-button type="success" @click="handleGrant(scope.row)">授权</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
-    
-    <!-- 分页 -->
-    <el-pagination
-      @size-change="handleSizeChange"
-      @current-change="handleCurrentChange"
-      :current-page="searchForm.pageNum"
-      :page-sizes="[10, 20, 50, 100]"
-      :page-size="searchForm.pageSize"
-      layout="total, sizes, prev, pager, next, jumper"
-      :total="total"
-    />
-    
-    <!-- 用户表单对话框 -->
-    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="40%">
-      <el-form :model="form" label-width="80px" :rules="rules" ref="formRef">
-        <el-form-item label="用户名" prop="username">
-          <el-input v-model="form.username" autocomplete="off" />
-        </el-form-item>
-        <el-form-item label="姓名" prop="realname">
-          <el-input v-model="form.realname" />
-        </el-form-item>
-        <el-form-item label="邮箱" prop="email">
-          <el-input v-model="form.email" />
-        </el-form-item>
-        <el-form-item label="状态">
-          <el-switch v-model="form.is_enabled" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="dialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="handleSave">确定</el-button>
-        </span>
-      </template>
-    </el-dialog>
-    
-    <!-- 角色授权对话框 -->
-    <el-dialog v-model="grantDialogVisible" title="角色授权" width="30%">
-      <el-checkbox-group v-model="selectedRoles">
-        <el-checkbox v-for="role in rolesList" :key="role.id" :label="role.id">
-          {{ role.name }}
-        </el-checkbox>
-      </el-checkbox-group>
-      <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="grantDialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="handleGrantSave">确定</el-button>
-        </span>
-      </template>
-    </el-dialog>
-  </div>
-</template>
+### 实时数据
+
+- WebSocket 连接推送实时股价
+- 定时器实现数据自动刷新
+- 错误重连机制保证数据连续性
+
+### 图表组件
+
+- ECharts 按需加载，减少打包体积
+- 专业股票图表配置
+- 响应式图表尺寸自适应
+- 丰富的交互功能支持
+
+### 性能优化
+
+- 路由懒加载减少初始加载时间
+- 组件按需引入
+- 图表数据缓存机制
+- 防抖节流优化用户操作
+- 虚拟滚动支持大数据量
+
+## 样式规范
+
+### 股票涨跌颜色
+
+```scss
+$price-up: #f56c6c; // 上涨红色
+$price-down: #67c23a; // 下跌绿色
+$price-flat: #909399; // 平盘灰色
 ```
 
-### 5. AI 聊天功能
+### 主题色彩
 
-实现了与 OpenAI 的流式对话功能，提供自然的聊天体验。
-
-#### 聊天组件 (`src/views/chat/index.vue`)
-
-```javascript
-<template>
-  <div class="chat-container">
-    <div class="chat-messages" ref="messagesContainer">
-      <div v-for="(msg, index) in messages" :key="index" :class="['message', msg.role]">
-        <div class="avatar">
-          <img :src="msg.role === 'user' ? userAvatar : botAvatar" alt="avatar">
-        </div>
-        <div class="content">
-          <div class="name">{{ msg.role === 'user' ? '你' : 'AI助手' }}</div>
-          <div class="text" v-html="formatMessage(msg.content)"></div>
-        </div>
-      </div>
-    </div>
-
-    <div class="chat-input">
-      <el-input
-        v-model="inputMessage"
-        type="textarea"
-        :rows="2"
-        placeholder="输入消息..."
-        @keyup.enter.native="sendMessage"
-      />
-      <el-button type="primary" @click="sendMessage" :loading="loading">发送</el-button>
-    </div>
-  </div>
-</template>
-
-<script setup>
-import { ref, onMounted, nextTick, computed } from 'vue';
-import { ElMessage } from 'element-plus';
-import marked from 'marked';
-import DOMPurify from 'dompurify';
-import requestUtil from '@/util/request';
-
-// 用户头像
-const userAvatar = computed(() => {
-  const user = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
-  return user.avatar || require('@/assets/user-avatar.png');
-});
-const botAvatar = require('@/assets/bot-avatar.png');
-
-// 消息列表
-const messages = ref([]);
-const inputMessage = ref('');
-const loading = ref(false);
-const messagesContainer = ref(null);
-
-// 获取聊天历史
-const getChatHistory = async () => {
-  try {
-    const res = await requestUtil.get('chat/history');
-    if (res.data.code === 200) {
-      const history = res.data.data;
-      history.forEach(item => {
-        messages.value.push({
-          role: 'user',
-          content: item.content
-        });
-        
-        if (item.response) {
-          messages.value.push({
-            role: 'assistant',
-            content: item.response
-          });
-        }
-      });
-      
-      // 滚动到底部
-      nextTick(() => {
-        scrollToBottom();
-      });
-    }
-  } catch (error) {
-    ElMessage.error('获取聊天历史失败');
-  }
-};
-
-// 发送消息
-const sendMessage = async () => {
-  if (!inputMessage.value.trim()) return;
-  
-  // 添加用户消息
-  messages.value.push({
-    role: 'user',
-    content: inputMessage.value.trim()
-  });
-  
-  // 清空输入框
-  const userMessage = inputMessage.value.trim();
-  inputMessage.value = '';
-  
-  // 滚动到底部
-  nextTick(() => {
-    scrollToBottom();
-  });
-  
-  // 正在加载状态
-  loading.value = true;
-  
-  // 添加AI消息占位
-  const aiMessageIndex = messages.value.length;
-  messages.value.push({
-    role: 'assistant',
-    content: ''
-  });
-  
-  try {
-    // 创建EventSource连接
-    const eventSource = new EventSource(`http://localhost:8000/chat/stream?message=${encodeURIComponent(userMessage)}`);
-    
-    eventSource.addEventListener('start', () => {
-      console.log('Chat stream started');
-    });
-    
-    eventSource.addEventListener('message', (event) => {
-      const data = JSON.parse(event.data);
-      if (data.content) {
-        // 追加内容
-        messages.value[aiMessageIndex].content += data.content;
-        
-        // 滚动到底部
-        nextTick(() => {
-          scrollToBottom();
-        });
-      }
-    });
-    
-    eventSource.addEventListener('end', () => {
-      eventSource.close();
-      loading.value = false;
-    });
-    
-    eventSource.addEventListener('error', (event) => {
-      const data = event.data ? JSON.parse(event.data) : { error: '连接错误' };
-      ElMessage.error(data.error || '聊天请求失败');
-      eventSource.close();
-      loading.value = false;
-      
-      // 如果消息为空，移除AI消息
-      if (!messages.value[aiMessageIndex].content) {
-        messages.value.splice(aiMessageIndex, 1);
-      }
-    });
-  } catch (error) {
-    ElMessage.error('发送消息失败');
-    loading.value = false;
-    
-    // 如果消息为空，移除AI消息
-    if (!messages.value[aiMessageIndex].content) {
-      messages.value.splice(aiMessageIndex, 1);
-    }
-  }
-};
-
-// 格式化消息，支持Markdown
-const formatMessage = (content) => {
-  return DOMPurify.sanitize(marked(content));
-};
-
-// 滚动到底部
-const scrollToBottom = () => {
-  if (messagesContainer.value) {
-    messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
-  }
-};
-
-onMounted(() => {
-  getChatHistory();
-});
-</script>
+```scss
+$primary: #409eff; // 主色调
+$success: #67c23a; // 成功色
+$warning: #e6a23c; // 警告色
+$danger: #f56c6c; // 危险色
 ```
 
-## 配置后端连接
+## 浏览器支持
 
-默认情况下，前端项目会连接到 `http://localhost:8000/` 作为后端 API 地址。如需修改，请在 `src/util/request.js` 文件中更新 `baseUrl` 变量：
+| Browser | Version |
+| ------- | ------- |
+| Chrome  | 88+     |
+| Firefox | 85+     |
+| Safari  | 14+     |
+| Edge    | 88+     |
 
-```javascript
-let baseUrl = "http://your-backend-url/";
-```
+## 开发指南
+
+### 添加新页面
+
+1. 在 `src/views` 目录创建页面组件
+2. 在 `src/router/index.js` 添加路由配置
+3. 配置页面权限和菜单项
+4. 添加 API 接口到 `src/api` 目录
+
+### 添加新图表
+
+1. 在 `main.js` 注册所需 ECharts 组件
+2. 创建图表配置对象
+3. 使用 `v-chart` 组件渲染
+4. 配置响应式和交互功能
+
+### 权限配置
+
+1. 在路由 meta 中配置所需权限
+2. 使用路由守卫验证权限
+3. 在组件中使用 v-if 控制显示
+4. API 请求自动验证权限

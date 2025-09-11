@@ -11,14 +11,27 @@ from django.db.models import Q
 
 from stock.models import StockBasic, StockDaily, StockCompany, StockBasicSerializer, StockDailySerializer, StockCompanySerializer
 from stock.services import StockDataService, TradingService, UserPermissionService, RealTimeDataService
+from stock.tushare_service import EnterpriseFinanceDataService
+enterprise_finance_service = EnterpriseFinanceDataService()
 from utils.permissions import require_role, require_login, admin_required, superadmin_required
 from user.models import SysUser
 
 
 @require_login
 def stock_list(request):
-    """股票列表 - 所有用户可访问"""
+    """股票列表 - 所有用户可访问，自动同步真实数据"""
     try:
+        from stock.services import StockDataService
+        
+        # 检查是否有股票数据，如果没有则自动同步
+        if not StockBasic.objects.exists():
+            sync_result = StockDataService.sync_stock_basic()
+            if not sync_result['success']:
+                return JsonResponse({
+                    'code': 500,
+                    'msg': f'同步股票基本信息失败: {sync_result["message"]}'
+                })
+        
         # 获取查询参数
         page = int(request.GET.get('page', 1))
         page_size = int(request.GET.get('pageSize', 20))
@@ -105,7 +118,7 @@ def stock_detail(request, ts_code):
         latest_daily = StockDaily.objects.filter(ts_code=ts_code).order_by('-trade_date').first()
         
         # 获取历史行情数据（最近30天）
-        history_data = StockDaily.objects.filter(ts_code=ts_code).order_by('-trade_date')[:30]
+        history_data = StockDaily.objects.filter(ts_code=ts_code).order_by('-trade_date')[:250]
         history_list = []
         for daily in reversed(history_data):  # 按时间正序
             history_list.append({
@@ -414,29 +427,55 @@ def market_overview(request):
 
 @require_login
 def stock_kline_data(request, ts_code):
-    """获取K线图数据 - 所有用户可访问"""
+    """获取K线图数据 - 所有用户可访问，自动获取真实数据"""
     try:
+        from stock.services import StockDataService
+        
         # 获取参数
         period = request.GET.get('period', 'daily')  # 周期：daily, weekly, monthly
         limit = int(request.GET.get('limit', 100))    # 数据条数
         adjust = request.GET.get('adjust', 'qfq')     # 复权类型：qfq前复权, hfq后复权, none不复权
         
         # 限制数据条数
-        limit = min(limit, 500)
+        limit = min(limit, 2000)
         
-        # 获取股票基本信息
+        # 获取股票基本信息，如果不存在则尝试同步
         try:
             stock = StockBasic.objects.get(ts_code=ts_code)
         except StockBasic.DoesNotExist:
-            return JsonResponse({
-                'code': 404,
-                'msg': '股票不存在'
-            })
+            # 股票不存在，尝试同步股票基本信息
+            sync_result = StockDataService.sync_stock_basic()
+            if sync_result['success']:
+                try:
+                    stock = StockBasic.objects.get(ts_code=ts_code)
+                except StockBasic.DoesNotExist:
+                    return JsonResponse({
+                        'code': 404,
+                        'msg': f'股票代码 {ts_code} 不存在于Tushare数据库中'
+                    })
+            else:
+                return JsonResponse({
+                    'code': 500,
+                    'msg': f'同步股票数据失败: {sync_result["message"]}'
+                })
+        
+        # 检查是否有K线数据，如果没有则同步
+        daily_data = StockDaily.objects.filter(ts_code=ts_code).order_by('-trade_date')
+        if not daily_data.exists():
+            # 没有K线数据，从Tushare同步
+            sync_result = StockDataService.sync_stock_daily(ts_code, days=90)  # 同步3个月数据
+            if sync_result['success']:
+                daily_data = StockDaily.objects.filter(ts_code=ts_code).order_by('-trade_date')
+            else:
+                return JsonResponse({
+                    'code': 500,
+                    'msg': f'同步股票日线数据失败: {sync_result["message"]}'
+                })
         
         # 获取K线数据
         if period == 'daily':
             # 日K线数据
-            daily_data = StockDaily.objects.filter(ts_code=ts_code).order_by('-trade_date')[:limit]
+            daily_data = daily_data[:limit]
             kline_data = []
             
             for daily in reversed(daily_data):  # 按时间正序
@@ -467,6 +506,13 @@ def stock_kline_data(request, ts_code):
                 'msg': '不支持的周期类型'
             })
         
+        # 如果仍然没有数据
+        if not kline_data:
+            return JsonResponse({
+                'code': 404,
+                'msg': f'未找到股票 {ts_code} 的K线数据'
+            })
+        
         # 计算技术指标
         technical_indicators = calculate_technical_indicators(kline_data)
         
@@ -481,7 +527,8 @@ def stock_kline_data(request, ts_code):
                 'count': len(kline_data),
                 'kline_data': kline_data,
                 'technical_indicators': technical_indicators,
-                'latest_info': kline_data[-1] if kline_data else None
+                'latest_info': kline_data[-1] if kline_data else None,
+                'data_source': 'tushare_real'
             }
         })
         
@@ -709,7 +756,7 @@ def stock_technical_analysis(request, ts_code):
     """获取股票技术分析数据 - 所有用户可访问"""
     try:
         # 获取最近100天的数据用于技术分析
-        daily_data = StockDaily.objects.filter(ts_code=ts_code).order_by('-trade_date')[:100]
+        daily_data = StockDaily.objects.filter(ts_code=ts_code).order_by('-trade_date')[:500]
         
         if not daily_data:
             return JsonResponse({
@@ -998,4 +1045,259 @@ def sync_news_manual(request):
         return JsonResponse({
             'code': 500,
             'msg': f'启动新闻同步失败: {str(e)}'
+        })
+
+
+@require_login
+def get_kline_data(request, ts_code):
+    """
+    获取K线数据
+    支持日线、周线、月线数据
+    """
+    try:
+        period = request.GET.get('period', 'daily')  # daily, weekly, monthly
+        start_date = request.GET.get('start_date', '20200101')
+        end_date = request.GET.get('end_date', None)
+        
+        # 获取日线数据
+        daily_data = enterprise_finance_service.get_daily_data(ts_code, start_date, end_date)
+        
+        if not daily_data:
+            return JsonResponse({
+                'code': 404,
+                'msg': '暂无K线数据'
+            })
+        
+        # 转换为前端ECharts所需的格式
+        # 数据格式：[date, open, close, low, high]
+        kline_data = []
+        for item in reversed(daily_data):  # 按时间正序
+            if len(item) >= 5:
+                date_str = item[0]
+                open_price = float(item[1])
+                high_price = float(item[2])
+                low_price = float(item[3])
+                close_price = float(item[4])
+                
+                # ECharts K线图数据格式：[open, close, low, high]
+                kline_data.append([open_price, close_price, low_price, high_price])
+        
+        # 计算移动平均线
+        def calculate_ma(data, days):
+            ma_data = []
+            for i in range(len(data)):
+                if i < days - 1:
+                    ma_data.append(None)
+                else:
+                    avg = sum([data[j][1] for j in range(i - days + 1, i + 1)]) / days  # 使用收盘价
+                    ma_data.append(round(avg, 2))
+            return ma_data
+        
+        ma5 = calculate_ma(kline_data, 5)
+        ma10 = calculate_ma(kline_data, 10)
+        ma20 = calculate_ma(kline_data, 20)
+        ma30 = calculate_ma(kline_data, 30)
+        
+        # 日期数据
+        dates = [item[0] for item in reversed(daily_data)]
+        
+        return JsonResponse({
+            'code': 200,
+            'msg': '获取成功',
+            'data': {
+                'dates': dates,
+                'kline': kline_data,
+                'ma5': ma5,
+                'ma10': ma10,
+                'ma20': ma20,
+                'ma30': ma30
+            }
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'code': 500,
+            'msg': f'获取K线数据失败: {str(e)}'
+        })
+
+
+@require_login
+def get_realtime_data(request, ts_code):
+    """
+    获取股票实时数据
+    """
+    try:
+        realtime_data = enterprise_finance_service.get_realtime_data(ts_code)
+        
+        if not realtime_data:
+            return JsonResponse({
+                'code': 404,
+                'msg': '暂无实时数据'
+            })
+        
+        # 计算涨跌额和涨跌幅
+        current_price = realtime_data['price']
+        pre_close = realtime_data['pre_close']
+        change = current_price - pre_close
+        pct_change = (change / pre_close) * 100 if pre_close > 0 else 0
+        
+        return JsonResponse({
+            'code': 200,
+            'msg': '获取成功',
+            'data': {
+                'ts_code': ts_code,
+                'current_price': current_price,
+                'open': realtime_data['open'],
+                'high': realtime_data['high'],
+                'low': realtime_data['low'],
+                'pre_close': pre_close,
+                'change': round(change, 2),
+                'pct_change': round(pct_change, 2),
+                'volume': realtime_data['volume'],
+                'amount': realtime_data['amount'],
+                'update_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'code': 500,
+            'msg': f'获取实时数据失败: {str(e)}'
+        })
+
+
+@require_login
+def get_intraday_chart(request, ts_code):
+    """
+    获取分时图数据
+    """
+    try:
+        intraday_data = enterprise_finance_service.get_intraday_ticks(ts_code)
+        
+        if not intraday_data:
+            return JsonResponse({
+                'code': 404,
+                'msg': '暂无分时数据'
+            })
+        
+        return JsonResponse({
+            'code': 200,
+            'msg': '获取成功',
+            'data': {
+                'time': intraday_data['time'],
+                'price': intraday_data['price']
+            }
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'code': 500,
+            'msg': f'获取分时数据失败: {str(e)}'
+        })
+
+
+@require_login
+def get_stock_holders(request, ts_code):
+    """
+    获取股票持股信息
+    """
+    try:
+        holders_data = enterprise_finance_service.get_stock_holders(ts_code)
+        
+        if not holders_data:
+            return JsonResponse({
+                'code': 404,
+                'msg': '暂无持股数据'
+            })
+        
+        # 转换为饼图数据格式
+        pie_data = []
+        total_hold = sum([item[1] for item in holders_data])
+        
+        for holder_name, hold_vol in holders_data:
+            percentage = (hold_vol / total_hold) * 100 if total_hold > 0 else 0
+            pie_data.append({
+                'name': holder_name,
+                'value': hold_vol,
+                'percentage': round(percentage, 2)
+            })
+        
+        return JsonResponse({
+            'code': 200,
+            'msg': '获取成功',
+            'data': pie_data
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'code': 500,
+            'msg': f'获取持股数据失败: {str(e)}'
+        })
+
+
+@require_login
+def get_hot_stocks(request):
+    """
+    获取热门股票
+    """
+    try:
+        limit = int(request.GET.get('limit', 10))
+        hot_stocks = enterprise_finance_service.get_top_gainers(limit)
+        
+        return JsonResponse({
+            'code': 200,
+            'msg': '获取成功',
+            'data': hot_stocks
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'code': 500,
+            'msg': f'获取热门股票失败: {str(e)}'
+        })
+
+
+@require_login
+def get_market_overview(request):
+    """
+    获取市场概览数据
+    """
+    try:
+        # 获取主要指数数据
+        indices = ['000001.SH', '399001.SZ', '399006.SZ']  # 上证指数、深证成指、创业板指
+        index_data = []
+        
+        for index_code in indices:
+            realtime = enterprise_finance_service.get_realtime_data(index_code)
+            if realtime:
+                change = realtime['price'] - realtime['pre_close']
+                pct_change = (change / realtime['pre_close']) * 100 if realtime['pre_close'] > 0 else 0
+                
+                index_name = {
+                    '000001.SH': '上证指数',
+                    '399001.SZ': '深证成指', 
+                    '399006.SZ': '创业板指'
+                }.get(index_code, index_code)
+                
+                index_data.append({
+                    'code': index_code,
+                    'name': index_name,
+                    'current': realtime['price'],
+                    'change': round(change, 2),
+                    'pct_change': round(pct_change, 2)
+                })
+        
+        return JsonResponse({
+            'code': 200,
+            'msg': '获取成功',
+            'data': {
+                'indices': index_data,
+                'update_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'code': 500,
+            'msg': f'获取市场概览失败: {str(e)}'
         })

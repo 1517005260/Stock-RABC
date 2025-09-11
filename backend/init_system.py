@@ -208,151 +208,82 @@ def create_stock_accounts(users_with_roles):
             print(f"  用户 {user.username} 股票账户已存在")
 
 
-def create_test_stocks():
-    """创建测试股票数据"""
-    print("\n=== 创建测试股票数据 ===")
+def sync_real_stock_data():
+    """同步真实股票数据 - 使用智能限流策略"""
+    print("\n=== 同步真实股票数据 ===")
     
-    # 使用非标准格式避免与真实股票混淆
-    stocks = [
-        {
-            'ts_code': 'TEST001.SZ',
-            'symbol': 'TEST001',
-            'name': '测试银行',
-            'fullname': '测试银行股份有限公司',
-            'industry': '银行',
-            'area': '深圳',
-            'market': '主板',
-            'exchange': 'SZSE',
-            'list_status': 'L',
-            'list_date': date(2020, 1, 1)
-        },
-        {
-            'ts_code': 'TEST002.SZ',
-            'symbol': 'TEST002',
-            'name': '测试地产',
-            'fullname': '测试地产开发有限公司',
-            'industry': '房地产开发',
-            'area': '深圳',
-            'market': '主板',
-            'exchange': 'SZSE',
-            'list_status': 'L',
-            'list_date': date(2020, 2, 1)
-        },
-        {
-            'ts_code': 'TEST003.SH',
-            'symbol': 'TEST003',
-            'name': '测试科技',
-            'fullname': '测试科技股份有限公司',
-            'industry': '软件开发',
-            'area': '上海',
-            'market': '主板',
-            'exchange': 'SSE',
-            'list_status': 'L',
-            'list_date': date(2020, 3, 1)
-        },
-        {
-            'ts_code': 'TEST004.SH',
-            'symbol': 'TEST004',
-            'name': '测试制造',
-            'fullname': '测试制造工业集团',
-            'industry': '机械设备',
-            'area': '上海',
-            'market': '主板',
-            'exchange': 'SSE',
-            'list_status': 'L',
-            'list_date': date(2020, 4, 1)
-        },
-        {
-            'ts_code': 'TEST005.SZ',
-            'symbol': 'TEST005',
-            'name': '测试医药',
-            'fullname': '测试医药生物科技有限公司',
-            'industry': '生物医药',
-            'area': '北京',
-            'market': '创业板',
-            'exchange': 'SZSE',
-            'list_status': 'L',
-            'list_date': date(2020, 5, 1)
-        },
-        {
-            'ts_code': 'TEST006.SZ',
-            'symbol': 'TEST006',
-            'name': '测试新能源',
-            'fullname': '测试新能源汽车股份公司',
-            'industry': '汽车制造',
-            'area': '广东',
-            'market': '主板',
-            'exchange': 'SZSE',
-            'list_status': 'L',
-            'list_date': date(2020, 6, 1)
-        }
-    ]
-    
-    for stock_data in stocks:
-        stock, created = StockBasic.objects.get_or_create(
-            ts_code=stock_data['ts_code'],
-            defaults=stock_data
-        )
-        if created:
-            print(f"  创建股票: {stock.name} ({stock.ts_code})")
-        else:
-            print(f"  股票已存在: {stock.name}")
-
-
-def create_stock_daily_data():
-    """创建股票行情数据"""
-    print("\n=== 创建股票行情数据 ===")
-    
-    # 为最近3天创建行情数据
-    today = date.today()
-    
-    stocks_prices = {
-        'TEST001.SZ': {'base_price': 10.50, 'name': '测试银行'},
-        'TEST002.SZ': {'base_price': 8.80, 'name': '测试地产'},  
-        'TEST003.SH': {'base_price': 45.20, 'name': '测试科技'},
-        'TEST004.SH': {'base_price': 23.10, 'name': '测试制造'},
-        'TEST005.SZ': {'base_price': 86.50, 'name': '测试医药'},
-        'TEST006.SZ': {'base_price': 128.90, 'name': '测试新能源'}
-    }
-    
-    import random
-    
-    for i in range(3):  # 最近3天
-        trade_date = today - timedelta(days=2-i)
+    try:
+        from stock.services import StockDataService, RateLimiter
+        import time
         
-        for ts_code, stock_info in stocks_prices.items():
-            base_price = stock_info['base_price']
-            
-            # 模拟价格波动
-            price_change = random.uniform(-0.05, 0.05)  # 5%内波动
-            close_price = base_price * (1 + price_change)
-            open_price = close_price * random.uniform(0.99, 1.01)
-            high_price = max(open_price, close_price) * random.uniform(1.00, 1.02)
-            low_price = min(open_price, close_price) * random.uniform(0.98, 1.00)
-            pre_close = base_price
-            
-            # 计算涨跌额和涨跌幅
-            change = Decimal(str(close_price)) - Decimal(str(pre_close))
-            pct_chg = (change / Decimal(str(pre_close))) * 100
-            
-            daily, created = StockDaily.objects.get_or_create(
-                ts_code=ts_code,
-                trade_date=trade_date,
-                defaults={
-                    'open': Decimal(str(round(open_price, 2))),
-                    'high': Decimal(str(round(high_price, 2))),
-                    'low': Decimal(str(round(low_price, 2))),
-                    'close': Decimal(str(round(close_price, 2))),
-                    'pre_close': Decimal(str(round(pre_close, 2))),
-                    'change': change,
-                    'pct_chg': pct_chg,
-                    'vol': random.randint(500000, 2000000),
-                    'amount': Decimal(str(round(random.uniform(50000, 200000), 2)))
-                }
-            )
-            
-            if created:
-                print(f"  创建行情: {ts_code} {trade_date}")
+        # 1. 同步股票基本信息 (优先级最高)
+        print("  正在同步股票基本信息...")
+        if RateLimiter.can_call("stock_basic", max_calls=1, time_window=300):  # 5分钟1次
+            RateLimiter.record_call("stock_basic")
+            sync_result = StockDataService.sync_stock_basic()
+            if sync_result['success']:
+                print(f"  {sync_result['message']}")
+            else:
+                print(f"  同步股票基本信息失败: {sync_result['message']}")
+                return False
+        else:
+            wait_time = RateLimiter.get_wait_time("stock_basic", max_calls=1, time_window=300)
+            print(f"  股票基本信息同步限流中，需等待{int(wait_time)}秒")
+            return False
+        
+        # 2. 分批同步热门股票的日线数据
+        popular_stocks = [
+            '000001.SZ',  # 平安银行
+            '000002.SZ',  # 万科A
+            '600036.SH',  # 招商银行
+            '600519.SH',  # 贵州茅台
+            '000858.SZ',  # 五粮液
+        ]
+        
+        print("  正在分批同步热门股票日线数据...")
+        api_name = "daily"
+        success_count = 0
+        
+        for i, ts_code in enumerate(popular_stocks):
+            try:
+                # 检查限流 - 每分钟最多2次调用
+                if not RateLimiter.can_call(api_name, max_calls=2, time_window=60):
+                    wait_time = RateLimiter.get_wait_time(api_name, max_calls=2, time_window=60)
+                    print(f"    API限流，等待{int(wait_time)}秒后继续...")
+                    time.sleep(wait_time + 1)  # 多等1秒确保安全
+                
+                # 记录API调用并同步数据
+                RateLimiter.record_call(api_name)
+                sync_result = StockDataService.sync_stock_daily(ts_code, days=30)
+                
+                if sync_result['success']:
+                    print(f"    {sync_result['message']}")
+                    success_count += 1
+                else:
+                    print(f"    同步{ts_code}失败: {sync_result['message']}")
+                
+                # 如果不是最后一个，等待间隔以避免过于频繁的调用
+                if i < len(popular_stocks) - 1:
+                    print(f"    等待5秒后继续下一个股票...")
+                    time.sleep(5)
+                    
+            except Exception as e:
+                print(f"    同步{ts_code}出现异常: {e}")
+                continue
+        
+        print(f"  成功同步{success_count}/{len(popular_stocks)}只股票的日线数据")
+        
+        if success_count > 0:
+            print("  股票数据同步完成！")
+            return True
+        else:
+            print("  警告：所有股票数据同步失败，可能是API限流或网络问题")
+            return False
+        
+    except Exception as e:
+        print(f"  同步真实股票数据失败: {e}")
+        print("  提示：如果是限流错误，请稍后再试")
+        return False
 
 
 def create_sample_news():
@@ -417,14 +348,11 @@ def main():
             # 6. 创建股票账户
             create_stock_accounts(users_with_roles)
             
-            # 7. 创建测试股票
-            create_test_stocks()
-            
-            # 8. 创建股票行情数据
-            create_stock_daily_data()
-            
-            # 9. 创建示例新闻
+            # 7. 创建示例新闻
             create_sample_news()
+        
+        # 8. 同步真实股票数据（放在事务外，因为可能耗时较长）
+        sync_real_stock_data()
         
         print("\n" + "=" * 50)
         print("系统初始化完成！")

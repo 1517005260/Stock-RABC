@@ -48,7 +48,6 @@
 <script setup>
 import {ref, onMounted} from 'vue'
 import requestUtil from '@/util/request'
-import qs from 'qs'
 import {ElMessage} from "element-plus";
 import Cookies from "js-cookie";
 import {encrypt, decrypt} from "@/util/jsencrypt";
@@ -76,7 +75,7 @@ const handleLogin = () => {
     if (valid) {
       try {
         loading.value = true
-        let result = await requestUtil.post("user/login?" + qs.stringify(loginForm.value))
+        let result = await requestUtil.post("user/login", loginForm.value)
         let data = result.data
         if (data.code == 200) {
           ElMessage.success(data.info || "登录成功")

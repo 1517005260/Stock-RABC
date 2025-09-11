@@ -52,6 +52,67 @@ const routes = [
         name: '我的URL',
         component: () => import('../views/accessible-urls/index.vue'),
         meta: { title: '我的可访问URL', requiresAuth: true }
+      },
+      // 股票交易模块
+      {
+        path: '/stock/dashboard',
+        name: '股票首页',
+        component: () => import('../views/stock/dashboard/index.vue'),
+        meta: { title: '股票交易首页', requiresAuth: true }
+      },
+      {
+        path: '/stock/list',
+        name: '股票列表',
+        component: () => import('../views/stock/list/index.vue'),
+        meta: { title: '股票列表', requiresAuth: true }
+      },
+      {
+        path: '/stock/detail/:tsCode',
+        name: '股票详情',
+        component: () => import('../views/stock/detail/index.vue'),
+        meta: { title: '股票详情', requiresAuth: true }
+      },
+      {
+        path: '/stock/trade/:tsCode',
+        name: '股票交易',
+        component: () => import('../views/stock/trade/index.vue'),
+        meta: { title: '股票交易', requiresAuth: true }
+      },
+      {
+        path: '/stock/news',
+        name: '股票新闻',
+        component: () => import('../views/stock/news/index.vue'),
+        meta: { title: '股票新闻', requiresAuth: true }
+      },
+      {
+        path: '/stock/news/:id',
+        name: '新闻详情',
+        component: () => import('../views/stock/news/detail.vue'),
+        meta: { title: '新闻详情', requiresAuth: true }
+      },
+      {
+        path: '/stock/watchlist',
+        name: '自选股票',
+        component: () => import('../views/stock/watchlist/index.vue'),
+        meta: { title: '自选股票', requiresAuth: true }
+      },
+      {
+        path: '/stock/positions',
+        name: '持仓管理',
+        component: () => import('../views/stock/positions/index.vue'),
+        meta: { title: '持仓管理', requiresAuth: true }
+      },
+      {
+        path: '/stock/records',
+        name: '交易记录',
+        component: () => import('../views/stock/records/index.vue'),
+        meta: { title: '交易记录', requiresAuth: true }
+      },
+      {
+        path: '/stock/account',
+        name: '账户总览',
+        component: () => import('../views/stock/account/index.vue'),
+        meta: { title: '账户总览', requiresAuth: true }
       }
     ]
   },

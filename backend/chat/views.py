@@ -63,12 +63,9 @@ SYSTEM_PROMPT = f"""你是一个智能助手，在回答用户问题时请遵循
 请注意，关于系统信息的回答必须准确，不要编造或推测。
 """
 
-# 如果API密钥不可用，使用模拟模式
-USE_MOCK = OPENAI_API_KEY == 'your_openai_api_key_here'
-
-# 创建OpenAI客户端（如果有API密钥）
+# 创建OpenAI客户端
 client = None
-if not USE_MOCK:
+if OPENAI_API_KEY != 'your_openai_api_key_here':
     try:
         # 清除代理环境变量
         for env_var in ['http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY']:
@@ -81,62 +78,44 @@ if not USE_MOCK:
             base_url=OPENAI_BASE_URL
         )
     except Exception as e:
-        print(f"Warning: 无法初始化OpenAI客户端: {e}")
-        USE_MOCK = True
+        print(f"Error: 无法初始化OpenAI客户端: {e}")
+        raise
 
 async def get_gpt_response(message):
-    """与OpenAI API进行流式通信或提供模拟响应"""
-    try:
-        if USE_MOCK:
-            # 模拟响应，用于演示或测试
-            mock_response = f"这是一个模拟的GPT回复。\n\n您的消息是: {message}\n\n在实际部署中，您需要在.env文件中配置OPENAI_API_KEY。"
-            for word in mock_response.split():
-                yield f"data: {word} "
-                await asyncio.sleep(0.1)  # 模拟网络延迟
-            yield f"data: [DONE]\n\n"
-        else:
-            # 实际调用OpenAI API
-            try:
-                response = await client.chat.completions.create(
-                    model=OPENAI_MODEL,
-                    messages=[
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": message}
-                    ],
-                    temperature=OPENAI_TEMPERATURE,
-                    max_tokens=OPENAI_MAX_TOKENS,
-                    stream=True,
-                )
-                
-                async for chunk in response:
-                    try:
-                        # 增强错误检查，确保所有属性都存在
-                        if (chunk and 
-                            hasattr(chunk, 'choices') and 
-                            chunk.choices and 
-                            len(chunk.choices) > 0 and 
-                            hasattr(chunk.choices[0], 'delta') and 
-                            chunk.choices[0].delta and 
-                            hasattr(chunk.choices[0].delta, 'content') and 
-                            chunk.choices[0].delta.content):
-                            content = chunk.choices[0].delta.content
-                            yield f"data: {content}\n\n"
-                    except (IndexError, AttributeError) as e:
-                        print(f"处理API响应块时出错: {e}, chunk={chunk}")
-                        continue
-                
-                yield f"data: [DONE]\n\n"
-            except Exception as e:
-                print(f"API调用错误: {e}")
-                # 如果API调用失败，返回错误消息
-                error_msg = f"调用API时发生错误: {str(e)}"
-                yield f"data: {error_msg}\n\n"
-                yield f"data: [DONE]\n\n"
-            
-    except Exception as e:
-        print(f"处理响应时发生错误: {e}")
-        yield f"data: 错误: {str(e)}\n\n"
-        yield f"data: [DONE]\n\n"
+    """与OpenAI API进行流式通信"""
+    if not client:
+        raise ValueError("OpenAI client not initialized - please check your API configuration")
+    
+    # 调用OpenAI API
+    response = await client.chat.completions.create(
+        model=OPENAI_MODEL,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": message}
+        ],
+        temperature=OPENAI_TEMPERATURE,
+        max_tokens=OPENAI_MAX_TOKENS,
+        stream=True,
+    )
+    
+    async for chunk in response:
+        try:
+            # 增强错误检查，确保所有属性都存在
+            if (chunk and 
+                hasattr(chunk, 'choices') and 
+                chunk.choices and 
+                len(chunk.choices) > 0 and 
+                hasattr(chunk.choices[0], 'delta') and 
+                chunk.choices[0].delta and 
+                hasattr(chunk.choices[0].delta, 'content') and 
+                chunk.choices[0].delta.content):
+                content = chunk.choices[0].delta.content
+                yield f"data: {content}\n\n"
+        except (IndexError, AttributeError) as e:
+            print(f"处理API响应块时出错: {e}, chunk={chunk}")
+            continue
+    
+    yield f"data: [DONE]\n\n"
 
 class ChatView(APIView):
     def get(self, request):
@@ -370,7 +349,7 @@ async def chat_stream(request, chat_id):
             yield f"data: [DONE]\n\n"
             full_response = error_msg
         
-        # 估算token数量 (简单估算，实际应从API响应获取)
+        # 估算token数量 (简单估算)
         tokens = len(chat.content.split()) + len(full_response.split())
         
         # 更新数据库中的消息

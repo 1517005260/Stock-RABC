@@ -24,5 +24,7 @@ urlpatterns = [
     
     # 管理员功能
     path('admin/accounts/', views.admin_user_accounts, name='admin_user_accounts'), # GET 管理员查看用户账户
+    path('admin/records/', views.admin_user_records, name='admin_user_records'),     # GET 管理员查看用户交易记录
+    path('admin/assets/adjust/', views.admin_adjust_assets, name='admin_adjust_assets'), # POST 管理员调整用户资产
     path('admin/freeze-user/', views.admin_freeze_user, name='admin_freeze_user'),   # POST 管理员冻结用户
 ]

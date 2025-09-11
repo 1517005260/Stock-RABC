@@ -17,10 +17,12 @@ from role.models import SysUserRole, SysRole
 load_dotenv()
 
 # 初始化Tushare
-token = os.getenv('TUSHARE_KEY')
+token = os.getenv('TUSHARE_TOKEN')  # 修正环境变量名
 if token:
     ts.set_token(token)
     pro = ts.pro_api()
+else:
+    pro = None  # 避免pro未定义的错误
 
 
 class StockDataService:
@@ -30,6 +32,13 @@ class StockDataService:
     def sync_stock_basic():
         """同步股票基本信息"""
         try:
+            if not pro:
+                return {
+                    'success': False,
+                    'message': 'TuShare API未配置或token无效',
+                    'count': 0
+                }
+                
             # 获取所有上市股票基本信息
             df = pro.stock_basic(exchange='', list_status='L', 
                                fields='ts_code,symbol,name,area,industry,fullname,enname,cnspell,market,exchange,curr_type,list_status,list_date,delist_date,is_hs,act_name,act_ent_type')
@@ -198,7 +207,7 @@ class StockDataService:
 
 
 class TradingService:
-    """交易服务 - 基于sample项目的交易逻辑"""
+    """交易服务"""
     
     @staticmethod
     def get_or_create_account(user):
@@ -228,7 +237,7 @@ class TradingService:
     
     @staticmethod
     def buy_stock(user, ts_code, price, shares):
-        """买入股票 - 参考sample项目的buy_in_stock逻辑"""
+        """买入股票"""
         try:
             with transaction.atomic():
                 # 检查股票是否存在
@@ -313,7 +322,7 @@ class TradingService:
     
     @staticmethod
     def sell_stock(user, ts_code, price, shares):
-        """卖出股票 - 参考sample项目的sold_out_stock逻辑"""
+        """卖出股票"""
         try:
             with transaction.atomic():
                 # 检查持仓
@@ -484,8 +493,92 @@ class NewsService:
         )
 
 
+class DataCache:
+    """数据缓存管理"""
+    _cache = {}
+    _cache_time = {}
+    
+    @classmethod
+    def get(cls, key, expiry_seconds=300):
+        """获取缓存数据，默认5分钟过期"""
+        if key in cls._cache:
+            if datetime.now().timestamp() - cls._cache_time[key] < expiry_seconds:
+                return cls._cache[key]
+            else:
+                # 清理过期缓存
+                del cls._cache[key]
+                del cls._cache_time[key]
+        return None
+    
+    @classmethod
+    def set(cls, key, value):
+        """设置缓存数据"""
+        cls._cache[key] = value
+        cls._cache_time[key] = datetime.now().timestamp()
+    
+    @classmethod
+    def clear_expired(cls, expiry_seconds=300):
+        """清理过期缓存"""
+        current_time = datetime.now().timestamp()
+        expired_keys = [
+            key for key, cache_time in cls._cache_time.items()
+            if current_time - cache_time >= expiry_seconds
+        ]
+        for key in expired_keys:
+            if key in cls._cache:
+                del cls._cache[key]
+            if key in cls._cache_time:
+                del cls._cache_time[key]
+
+
+class RateLimiter:
+    """接口限流管理"""
+    _call_records = {}
+    
+    @classmethod
+    def can_call(cls, api_name, max_calls=2, time_window=60):
+        """检查是否可以调用API"""
+        current_time = datetime.now().timestamp()
+        
+        if api_name not in cls._call_records:
+            cls._call_records[api_name] = []
+        
+        # 清理过期记录
+        cls._call_records[api_name] = [
+            call_time for call_time in cls._call_records[api_name]
+            if current_time - call_time < time_window
+        ]
+        
+        # 检查是否超过限制
+        if len(cls._call_records[api_name]) >= max_calls:
+            return False
+        
+        return True
+    
+    @classmethod
+    def record_call(cls, api_name):
+        """记录API调用"""
+        current_time = datetime.now().timestamp()
+        if api_name not in cls._call_records:
+            cls._call_records[api_name] = []
+        cls._call_records[api_name].append(current_time)
+    
+    @classmethod
+    def get_wait_time(cls, api_name, max_calls=2, time_window=60):
+        """获取需要等待的时间"""
+        if cls.can_call(api_name, max_calls, time_window):
+            return 0
+        
+        if api_name not in cls._call_records or not cls._call_records[api_name]:
+            return 0
+        
+        oldest_call = min(cls._call_records[api_name])
+        current_time = datetime.now().timestamp()
+        return max(0, time_window - (current_time - oldest_call))
+
+
 class RealTimeDataService:
-    """实时股票数据服务 - 支持5秒刷新功能"""
+    """实时股票数据服务 - 支持5秒刷新功能，智能缓存和限流"""
     
     @staticmethod
     def is_trading_time():
@@ -710,9 +803,52 @@ class RealTimeDataService:
     
     @staticmethod
     def get_intraday_chart_data(ts_code):
-        """获取分时图数据 - 使用Tushare真实数据"""
+        """获取分时图数据 - 使用智能缓存和限流策略"""
         try:
-            # 获取最新日线数据作为基础信息
+            # 1. 检查缓存
+            cache_key = f"intraday_chart_{ts_code}"
+            cached_data = DataCache.get(cache_key, expiry_seconds=30)  # 30秒缓存
+            if cached_data:
+                cached_data['data']['message'] = f'使用缓存数据 (30秒内有效)'
+                cached_data['data']['data_source'] = 'cache'
+                return cached_data
+            
+            # 2. 检查限流
+            api_name = "stk_mins"
+            if not RateLimiter.can_call(api_name, max_calls=2, time_window=60):
+                wait_time = RateLimiter.get_wait_time(api_name, max_calls=2, time_window=60)
+                
+                # 超出限流，返回数据库中的最新数据
+                latest_daily = StockDaily.objects.filter(ts_code=ts_code).order_by('-trade_date').first()
+                if not latest_daily:
+                    return {
+                        'success': False,
+                        'message': f'API限流中，需等待{int(wait_time)}秒，且未找到股票数据'
+                    }
+                
+                return {
+                    'success': True,
+                    'data': {
+                        'ts_code': ts_code,
+                        'intraday_data': [],  # 限流期间不提供分时数据
+                        'base_info': {
+                            'current_price': float(latest_daily.close) if latest_daily.close else 0,
+                            'pre_close': float(latest_daily.pre_close) if latest_daily.pre_close else 0,
+                            'high': float(latest_daily.high) if latest_daily.high else 0,
+                            'low': float(latest_daily.low) if latest_daily.low else 0,
+                            'change': float(latest_daily.change) if latest_daily.change else 0,
+                            'pct_chg': float(latest_daily.pct_chg) if latest_daily.pct_chg else 0,
+                            'volume': latest_daily.vol if latest_daily.vol else 0,
+                            'amount': float(latest_daily.amount) if latest_daily.amount else 0,
+                            'trade_date': latest_daily.trade_date.strftime('%Y-%m-%d')
+                        },
+                        'timestamp': datetime.now().isoformat(),
+                        'data_source': 'database_daily_rate_limited',
+                        'message': f'API限流中，需等待{int(wait_time)}秒。显示最新日线数据'
+                    }
+                }
+            
+            # 3. 获取基础数据
             latest_daily = StockDaily.objects.filter(ts_code=ts_code).order_by('-trade_date').first()
             if not latest_daily:
                 return {
@@ -720,12 +856,17 @@ class RealTimeDataService:
                     'message': '未找到股票数据'
                 }
             
-            # 尝试获取真实的分时数据
+            # 4. 尝试获取真实的分时数据
             intraday_data = []
+            data_source = 'database_daily'
+            message = '当前非交易时间或无分时数据权限，显示最新日线数据'
+            
             try:
                 if pro and RealTimeDataService.is_trading_time():
-                    # 使用Tushare获取分时数据（需要高级权限）
-                    # 注意：分时数据接口需要较高权限，可能无法获取到
+                    # 记录API调用
+                    RateLimiter.record_call(api_name)
+                    
+                    # 使用Tushare获取分时数据
                     today = datetime.now().strftime('%Y%m%d')
                     df = pro.stk_mins(ts_code=ts_code, freq='1min', trade_date=today)
                     
@@ -739,16 +880,22 @@ class RealTimeDataService:
                                 'change': float(row['close'] - latest_daily.pre_close) if row['close'] and latest_daily.pre_close else 0,
                                 'pct_change': float((row['close'] - latest_daily.pre_close) / latest_daily.pre_close * 100) if row['close'] and latest_daily.pre_close else 0
                             })
+                        
+                        data_source = 'tushare_realtime'
+                        message = f'获取到{len(intraday_data)}个分时数据点'
                 
             except Exception as e:
                 print(f"获取Tushare分时数据失败: {e}")
-                # 如果无法获取真实分时数据，则不提供分时数据，只提供基础信息
+                # 如果API调用失败，返回空分时数据但保留基础信息
+                data_source = 'database_daily_api_failed'
+                message = f'Tushare API调用失败: {str(e)}，显示最新日线数据'
             
-            return {
+            # 5. 构建返回数据
+            result = {
                 'success': True,
                 'data': {
                     'ts_code': ts_code,
-                    'intraday_data': intraday_data,  # 如果获取失败则为空列表
+                    'intraday_data': intraday_data,
                     'base_info': {
                         'current_price': float(latest_daily.close) if latest_daily.close else 0,
                         'pre_close': float(latest_daily.pre_close) if latest_daily.pre_close else 0,
@@ -761,10 +908,15 @@ class RealTimeDataService:
                         'trade_date': latest_daily.trade_date.strftime('%Y-%m-%d')
                     },
                     'timestamp': datetime.now().isoformat(),
-                    'data_source': 'tushare_realtime' if intraday_data else 'database_daily',
-                    'message': f'分时数据点数量: {len(intraday_data)}' if intraday_data else '当前非交易时间或无分时数据权限，显示最新日线数据'
+                    'data_source': data_source,
+                    'message': message
                 }
             }
+            
+            # 6. 缓存结果
+            DataCache.set(cache_key, result)
+            
+            return result
             
         except Exception as e:
             return {

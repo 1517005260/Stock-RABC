@@ -8,6 +8,7 @@ import django
 import logging
 from datetime import datetime, timedelta
 from decimal import Decimal
+import json
 
 # 设置Django环境
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

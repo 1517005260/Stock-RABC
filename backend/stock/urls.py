@@ -9,19 +9,20 @@ urlpatterns = [
     # 股票信息相关
     path('list/', views.stock_list, name='stock_list'),                    # GET 股票列表
     path('detail/<str:ts_code>/', views.stock_detail, name='stock_detail'), # GET 股票详情
-    path('hot/', views.stock_hot_list, name='stock_hot_list'),             # GET 热门股票
+    path('hot/', views.get_hot_stocks, name='get_hot_stocks'),             # GET 热门股票
     path('search/', views.stock_search, name='stock_search'),              # GET 股票搜索
     path('industries/', views.stock_industries, name='stock_industries'),   # GET 行业列表
     
-    # 实时数据相关 - 支持5秒刷新
-    path('realtime/data/<str:ts_code>/', views.stock_realtime_data, name='stock_realtime_data'),    # GET 实时分时数据
-    path('realtime/chart/<str:ts_code>/', views.stock_intraday_chart, name='stock_intraday_chart'), # GET 分时图数据
+    # 实时数据相关
+    path('realtime/data/<str:ts_code>/', views.get_realtime_data, name='get_realtime_data'),    # GET 实时数据
+    path('realtime/chart/<str:ts_code>/', views.get_intraday_chart, name='get_intraday_chart'), # GET 分时图数据
     path('realtime/price/<str:ts_code>/', views.stock_realtime_price, name='stock_realtime_price'), # GET 实时价格
-    path('market/overview/', views.market_overview, name='market_overview'),                        # GET 市场概况
+    path('market/overview/', views.get_market_overview, name='get_market_overview'),              # GET 市场概况
     
     # K线图和技术分析相关
-    path('kline/<str:ts_code>/', views.stock_kline_data, name='stock_kline_data'),                 # GET K线数据
+    path('kline/<str:ts_code>/', views.get_kline_data, name='get_kline_data'),                   # GET K线数据
     path('technical/<str:ts_code>/', views.stock_technical_analysis, name='stock_technical_analysis'), # GET 技术分析
+    path('holders/<str:ts_code>/', views.get_stock_holders, name='get_stock_holders'),          # GET 股票持股信息
     
     # 新闻相关
     path('news/', views.market_news_list, name='market_news_list'),                                # GET 新闻列表

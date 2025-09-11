@@ -11,6 +11,10 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 """
 import os.path
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -149,8 +153,25 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-# Internationalization
-# https://docs.djangoproject.com/en/5.1/topics/i18n/
+# TuShare API配置
+# 请在生产环境中替换为真实的TuShare API Token
+# 可以从环境变量中读取，确保安全性
+TUSHARE_TOKEN = os.getenv('TUSHARE_TOKEN', 'your_tushare_token_here')
+
+# 股票数据更新频率（秒）
+STOCK_DATA_REFRESH_INTERVAL = 30
+
+# 交易相关配置
+TRADING_CONFIG = {
+    'MIN_SHARES': 100,  # 最小交易股数
+    'COMMISSION_RATE': 0.0003,  # 手续费率
+    'STAMP_TAX_RATE': 0.001,  # 印花税率（仅卖出）
+    'TRANSFER_FEE_RATE': 0.00001,  # 过户费率
+    'MIN_COMMISSION': 5.0,  # 最小手续费
+}
+
+# 初始资金配置
+DEFAULT_INITIAL_BALANCE = 100000.00  # 默认10万初始资金
 
 LANGUAGE_CODE = 'zh-Hans'
 

@@ -13,24 +13,35 @@ from trading.models import (UserStockAccount, UserPosition, TradeRecord, UserWat
                           UserWatchListSerializer, MarketNewsSerializer)
 from stock.services import TradingService, UserPermissionService
 from stock.models import StockBasic, StockDaily
+from stock.tushare_service import enterprise_finance_service
 from utils.permissions import require_login, admin_required, data_permission_filter
 from user.models import SysUser
+from datetime import datetime
+import time
 
 
 @require_login
 @csrf_exempt
 @require_http_methods(["POST"])
 def buy_stock(request):
-    """买入股票 - 所有用户可访问"""
+    """
+    买入股票
+    支持AJAX请求，返回JSON响应
+    """
     try:
         # 获取当前用户
         user = SysUser.objects.get(id=request.user_id)
         
-        # 解析请求数据
-        data = json.loads(request.body)
-        ts_code = data.get('ts_code')
-        price = data.get('price')
-        shares = data.get('shares')
+        # 解析请求数据 - 支持AJAX GET和POST
+        if request.method == 'GET':
+            price = float(request.GET.get("price"))
+            shares = int(request.GET.get("shares"))
+            ts_code = request.GET.get("ts_code")
+        else:
+            data = json.loads(request.body)
+            price = float(data.get('price'))
+            shares = int(data.get('shares'))
+            ts_code = data.get('ts_code')
         
         # 参数验证
         if not all([ts_code, price, shares]):
@@ -39,38 +50,104 @@ def buy_stock(request):
                 'msg': '参数不完整，请提供股票代码、价格和数量'
             })
         
-        try:
-            price = float(price)
-            shares = int(shares)
-        except (ValueError, TypeError):
-            return JsonResponse({
-                'code': 400,
-                'msg': '价格和数量格式错误'
-            })
-        
         if price <= 0 or shares <= 0:
             return JsonResponse({
                 'code': 400,
                 'msg': '价格和数量必须大于0'
             })
         
-        # 调用交易服务
-        result = TradingService.buy_stock(user, ts_code, price, shares)
+        # 计算交易金额
+        trade_amount = price * shares
         
-        if result['success']:
+        # 获取或创建用户股票账户
+        account, created = UserStockAccount.objects.get_or_create(
+            user=user,
+            defaults={
+                'account_balance': Decimal('100000.00'),  # 默认10万初始资金
+                'frozen_balance': Decimal('0.00'),
+                'total_assets': Decimal('100000.00'),
+                'total_profit': Decimal('0.00')
+            }
+        )
+        
+        # 获取股票信息
+        try:
+            stock = StockBasic.objects.get(ts_code=ts_code)
+        except StockBasic.DoesNotExist:
             return JsonResponse({
-                'code': 200,
-                'msg': result['message'],
-                'data': {
-                    'remaining_balance': float(result['remaining_balance'])
+                'code': 404,
+                'msg': '股票不存在'
+            })
+        
+        # 检查资金是否充足和账户状态
+        if (account.account_balance >= Decimal(str(trade_amount)) and 
+            not getattr(user, 'freeze', False) and 
+            getattr(user, 'account_opened', True)):
+            
+            # 资金充足，执行买入
+            # 扣除资金
+            account.account_balance -= Decimal(str(trade_amount))
+            account.save()
+            
+            # 更新持仓
+            position, created = UserPosition.objects.get_or_create(
+                user=user,
+                ts_code=ts_code,
+                defaults={
+                    'stock_name': stock.name,
+                    'position_shares': 0,
+                    'available_shares': 0,
+                    'cost_price': Decimal(str(price)),
+                    'current_price': Decimal(str(price))
                 }
+            )
+            
+            if not created:
+                # 计算新的成本价（加权平均）
+                total_cost = (position.position_shares * position.cost_price + 
+                             shares * Decimal(str(price)))
+                total_shares = position.position_shares + shares
+                position.cost_price = total_cost / total_shares
+            
+            position.position_shares += shares
+            position.available_shares += shares
+            position.current_price = Decimal(str(price))
+            position.save()
+            
+            # 记录交易历史
+            TradeRecord.objects.create(
+                user=user,
+                ts_code=ts_code,
+                stock_name=stock.name,
+                trade_type='BUY',
+                trade_price=Decimal(str(price)),
+                trade_shares=shares,
+                trade_amount=Decimal(str(trade_amount)),
+                commission=Decimal('5.00'),  # 固定手续费
+                status='COMPLETED'
+            )
+            
+            return JsonResponse({
+                "flag": 1,
+                "money": 1,  # 资金充足标识
+                "msg": "买入成功",
+                "remaining_balance": float(account.account_balance)
             })
         else:
+            # 资金不足或账户问题
+            money_flag = 1 if account.account_balance >= Decimal(str(trade_amount)) else 0
+            
             return JsonResponse({
-                'code': 400,
-                'msg': result['message']
+                "flag": 0,
+                "money": money_flag,
+                "msg": "买入失败：资金不足或账户被冻结" if money_flag else "买入失败：资金不足"
             })
         
+    except (ValueError, TypeError) as e:
+        return JsonResponse({
+            'code': 400,
+            'msg': f'参数格式错误: {str(e)}'
+        })
     except SysUser.DoesNotExist:
         return JsonResponse({
             'code': 404,
@@ -652,4 +729,144 @@ def trading_statistics(request):
         return JsonResponse({
             'code': 500,
             'msg': f'获取统计数据失败: {str(e)}'
+        })
+
+
+@admin_required
+def admin_user_records(request):
+    """管理员查看用户交易记录 - 仅管理员可访问"""
+    try:
+        page = int(request.GET.get('page', 1))
+        page_size = int(request.GET.get('pageSize', 20))
+        user_id = request.GET.get('user_id')
+        
+        # 构建查询集
+        if user_id:
+            queryset = TradeRecord.objects.filter(user_id=user_id)
+        else:
+            queryset = TradeRecord.objects.all()
+        
+        # 分页
+        paginator = Paginator(queryset.order_by('-trade_time'), page_size)
+        trades = paginator.get_page(page)
+        
+        # 序列化数据
+        trade_list = []
+        for trade in trades:
+            trade_data = {
+                'id': trade.id,
+                'user_id': trade.user.id,
+                'username': trade.user.username,
+                'ts_code': trade.ts_code,
+                'stock_name': trade.stock_name,
+                'trade_type': trade.trade_type,
+                'trade_type_display': trade.get_trade_type_display(),
+                'trade_price': float(trade.trade_price),
+                'trade_shares': trade.trade_shares,
+                'trade_amount': float(trade.trade_amount),
+                'commission': float(trade.commission),
+                'trade_time': trade.trade_time.strftime('%Y-%m-%d %H:%M:%S'),
+                'status': trade.status,
+                'status_display': trade.get_status_display(),
+                'remark': trade.remark,
+            }
+            trade_list.append(trade_data)
+        
+        return JsonResponse({
+            'code': 200,
+            'msg': '获取成功',
+            'data': {
+                'list': trade_list,
+                'total': paginator.count,
+                'page': page,
+                'pageSize': page_size,
+                'totalPages': paginator.num_pages,
+            }
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'code': 500,
+            'msg': f'获取用户交易记录失败: {str(e)}'
+        })
+
+
+@admin_required
+@csrf_exempt
+@require_http_methods(["POST"])
+def admin_adjust_assets(request):
+    """管理员调整用户资产 - 仅管理员可访问"""
+    try:
+        data = json.loads(request.body)
+        user_id = data.get('user_id')
+        adjust_amount = data.get('adjust_amount')
+        reason = data.get('reason', '管理员调整')
+        
+        if not user_id or adjust_amount is None:
+            return JsonResponse({
+                'code': 400,
+                'msg': '请提供用户ID和调整金额'
+            })
+        
+        try:
+            adjust_amount = Decimal(str(adjust_amount))
+        except (ValueError, TypeError):
+            return JsonResponse({
+                'code': 400,
+                'msg': '调整金额格式错误'
+            })
+        
+        try:
+            user = SysUser.objects.get(id=user_id)
+            account = TradingService.get_or_create_account(user)
+            
+            # 记录调整前的资产
+            old_balance = account.account_balance
+            
+            # 调整资产
+            account.account_balance += adjust_amount
+            
+            # 检查资产不能为负
+            if account.account_balance < 0:
+                return JsonResponse({
+                    'code': 400,
+                    'msg': '调整后资产不能为负数'
+                })
+            
+            account.save()
+            
+            # 记录调整日志
+            TradeRecord.objects.create(
+                user=user,
+                ts_code='ADMIN_ADJUST',
+                stock_name='资产调整',
+                trade_type='ADJUST',
+                trade_price=Decimal('0.00'),
+                trade_shares=0,
+                trade_amount=adjust_amount,
+                commission=Decimal('0.00'),
+                status='COMPLETED',
+                remark=f'{reason}，调整前: {old_balance}，调整后: {account.account_balance}'
+            )
+            
+            return JsonResponse({
+                'code': 200,
+                'msg': '资产调整成功',
+                'data': {
+                    'old_balance': float(old_balance),
+                    'new_balance': float(account.account_balance),
+                    'adjust_amount': float(adjust_amount)
+                }
+            })
+            
+        except SysUser.DoesNotExist:
+            return JsonResponse({
+                'code': 404,
+                'msg': '用户不存在'
+            })
+        
+    except Exception as e:
+        return JsonResponse({
+            'code': 500,
+            'msg': f'资产调整失败: {str(e)}'
         })
