@@ -74,10 +74,25 @@
         <el-card class="chart-card">
           <template #header>
             <div class="card-header">
-              <span>{{ stockDetail?.name || '' }} - K线图</span>
+              <span>{{ stockDetail?.name || '' }} - {{ chartMode === 'kline' ? 'K线图' : '实时股价' }}</span>
               <div class="chart-actions">
                 <el-button 
-                  type="primary" 
+                  :type="chartMode === 'kline' ? 'primary' : ''"
+                  size="small" 
+                  @click="switchToKline"
+                >
+                  股票日K
+                </el-button>
+                <el-button 
+                  :type="chartMode === 'realtime' ? 'primary' : ''"
+                  size="small" 
+                  @click="switchToRealtime"
+                  :disabled="!isMarketOpen"
+                >
+                  实时股价
+                </el-button>
+                <el-button 
+                  type="success" 
                   size="small" 
                   @click="openTradeDialog"
                   :disabled="!hasTradePermission"
@@ -88,12 +103,23 @@
             </div>
           </template>
           
-          <!-- 使用我们新创建的K线图组件 -->
+          <!-- K线图模式 -->
           <KlineChart 
+            v-if="chartMode === 'kline'"
             :ts-code="tsCode" 
             :stock-name="stockDetail?.name || ''"
             chart-height="450px"
           />
+          
+          <!-- 实时股价图模式 -->
+          <div v-else-if="chartMode === 'realtime'" class="realtime-chart">
+            <v-chart
+              class="realtime-chart-container"
+              :option="realtimeChartOption"
+              :loading="realtimeLoading"
+              autoresize
+            />
+          </div>
         </el-card>
       </el-col>
 
@@ -191,37 +217,290 @@
 
 <script>
 import { ArrowLeft } from '@element-plus/icons-vue'
-import { getStockDetail } from '@/api/stock'
+import { getStockDetail, getRealtimeData } from '@/api/stock'
 import { buyStock } from '@/api/trading'
 import KlineChart from '@/components/KlineChart.vue'
 import StockHoldersChart from '@/components/StockHoldersChart.vue'
+import VChart from "vue-echarts"
+import { use } from "echarts/core"
+import { CanvasRenderer } from "echarts/renderers"
+import { LineChart } from "echarts/charts"
+import {
+  TitleComponent,
+  TooltipComponent,
+  LegendComponent,
+  GridComponent,
+  DataZoomComponent,
+  ToolboxComponent
+} from "echarts/components"
+
+use([
+  CanvasRenderer,
+  LineChart,
+  TitleComponent,
+  TooltipComponent,
+  LegendComponent,
+  GridComponent,
+  DataZoomComponent,
+  ToolboxComponent
+])
 
 export default {
   name: 'StockDetail',
   components: {
     ArrowLeft,
     KlineChart,
-    StockHoldersChart
+    StockHoldersChart,
+    VChart
   },
   data() {
     return {
       loading: false,
       stockDetail: null,
+      chartMode: 'kline', // 'kline' or 'realtime'
+      realtimeLoading: false,
+      realtimeData: [],
       tradeDialogVisible: false,
       tradeForm: {
         shares: 100
       },
       tradeExecuting: false,
-      hasTradePermission: true // 模拟交易权限
+      hasTradePermission: true, // 模拟交易权限
+      realtimeTimer: null
     }
   },
   computed: {
     tsCode() {
       return this.$route.params.tsCode
+    },
+    
+    isMarketOpen() {
+      const now = new Date()
+      const hour = now.getHours()
+      // 简单的开盘时间判断：9:00-15:00
+      return hour >= 9 && hour <= 15
+    },
+    
+    realtimeChartOption() {
+      // 参考sample项目的处理方式，优雅降级
+      if (!this.realtimeData || !Array.isArray(this.realtimeData) || !this.realtimeData.length) {
+        // 无分时数据时，显示提示信息，但保持图表容器有效
+        return {
+          title: {
+            text: '暂无分时数据',
+            left: 'center',
+            top: 'middle',
+            textStyle: {
+              color: '#999',
+              fontSize: 16
+            }
+          },
+          // 保持基础的坐标轴结构，避免ECharts内部错误
+          xAxis: {
+            type: 'category',
+            data: [],
+            show: false
+          },
+          yAxis: {
+            type: 'value',
+            show: false
+          },
+          series: [
+            {
+              name: '暂无数据',
+              type: 'line',
+              data: [],
+              showSymbol: false
+            }
+          ]
+        }
+      }
+      
+      // 验证和过滤数据
+      const validData = this.realtimeData.filter(item => 
+        item && 
+        typeof item === 'object' && 
+        item.time && 
+        item.price != null && 
+        !isNaN(parseFloat(item.price))
+      )
+      
+      if (validData.length === 0) {
+        // 数据格式异常时的降级处理
+        return {
+          title: {
+            text: '数据格式异常，请稍后重试',
+            left: 'center',
+            top: 'middle',
+            textStyle: {
+              color: '#ff6b6b',
+              fontSize: 14
+            }
+          },
+          xAxis: {
+            type: 'category',
+            data: [],
+            show: false
+          },
+          yAxis: {
+            type: 'value', 
+            show: false
+          },
+          series: [
+            {
+              name: '数据异常',
+              type: 'line',
+              data: [],
+              showSymbol: false
+            }
+          ]
+        }
+      }
+      
+      // 格式化时间显示：将091505格式转换为09:15格式
+      const formatTimeDisplay = (timeStr) => {
+        if (!timeStr) return timeStr
+        
+        // 如果是091505这种6位格式，转换为09:15
+        if (typeof timeStr === 'string' && timeStr.length === 6 && /^\d{6}$/.test(timeStr)) {
+          const hours = timeStr.substring(0, 2)
+          const minutes = timeStr.substring(2, 4)
+          return `${hours}:${minutes}`
+        }
+        
+        // 如果是09:15这种格式，直接返回
+        if (typeof timeStr === 'string' && timeStr.includes(':')) {
+          return timeStr
+        }
+        
+        // 其他格式尝试转换
+        return timeStr
+      }
+      
+      // 同时验证时间和价格，确保配对
+      const validPairs = validData.filter(item => {
+        const price = parseFloat(item.price)
+        return !isNaN(price) && price != null && formatTimeDisplay(item.time)
+      })
+      
+      if (validPairs.length === 0) {
+        // 所有数据都无效时的降级处理
+        return {
+          title: {
+            text: '分时数据无有效数值',
+            left: 'center',
+            top: 'middle', 
+            textStyle: {
+              color: '#ff6b6b',
+              fontSize: 14
+            }
+          },
+          xAxis: {
+            type: 'category',
+            data: [],
+            show: false
+          },
+          yAxis: {
+            type: 'value',
+            show: false
+          },
+          series: [
+            {
+              name: '无效数据',
+              type: 'line',
+              data: [],
+              showSymbol: false
+            }
+          ]
+        }
+      }
+      
+      const times = validPairs.map(item => formatTimeDisplay(item.time))
+      const prices = validPairs.map(item => parseFloat(item.price))
+      
+      return {
+        title: {
+          text: '实时股价',
+          left: 'center'
+        },
+        tooltip: {
+          trigger: 'axis',
+          position: function (pt) {
+            return [pt[0], '10%']
+          }
+        },
+        toolbox: {
+          feature: {
+            dataZoom: {
+              yAxisIndex: 'none'
+            },
+            restore: {},
+            saveAsImage: {}
+          }
+        },
+        xAxis: {
+          type: 'category',
+          boundaryGap: false,
+          data: times
+        },
+        yAxis: {
+          type: 'value',
+          boundaryGap: [0, '100%']
+        },
+        dataZoom: [
+          {
+            type: 'inside',
+            start: 0,
+            end: 100
+          },
+          {
+            start: 0,
+            end: 100,
+            handleIcon: 'M10.7,11.9v-1.3H9.3v1.3c-4.9,0.3-8.8,4.4-8.8,9.4c0,5,3.9,9.1,8.8,9.4v1.3h1.3v-1.3c4.9-0.3,8.8-4.4,8.8-9.4C19.5,16.3,15.6,12.2,10.7,11.9z M13.3,24.4H6.7V23h6.6V24.4z M13.3,19.6H6.7v-1.4h6.6V19.6z',
+            handleSize: '80%',
+            handleStyle: {
+              color: '#fff',
+              shadowBlur: 3,
+              shadowColor: 'rgba(0, 0, 0, 0.6)',
+              shadowOffsetX: 2,
+              shadowOffsetY: 2
+            }
+          }
+        ],
+        series: [
+          {
+            name: '股价',
+            type: 'line',
+            smooth: true,
+            symbol: 'none',
+            sampling: 'average',
+            itemStyle: {
+              color: 'rgb(255, 70, 131)'
+            },
+            areaStyle: {
+              color: {
+                type: 'linear',
+                x: 0,
+                y: 0,
+                x2: 0,
+                y2: 1,
+                colorStops: [
+                  { offset: 0, color: 'rgb(255, 158, 68)' },
+                  { offset: 1, color: 'rgb(255, 70, 131)' }
+                ]
+              }
+            },
+            data: prices
+          }
+        ]
+      }
     }
   },
   async created() {
     await this.getStockDetail()
+  },
+  beforeUnmount() {
+    this.clearRealtimeTimer()
   },
   methods: {
     async getStockDetail() {
@@ -240,6 +519,58 @@ export default {
         this.$message.error('获取股票详情失败')
       } finally {
         this.loading = false
+      }
+    },
+    
+    switchToKline() {
+      this.chartMode = 'kline'
+      this.clearRealtimeTimer()
+    },
+    
+    switchToRealtime() {
+      if (!this.isMarketOpen) {
+        this.$message.warning('当前非开盘时间！！')
+        return
+      }
+      
+      this.chartMode = 'realtime'
+      this.loadRealtimeData()
+      this.startRealtimeTimer()
+    },
+    
+    async loadRealtimeData() {
+      this.realtimeLoading = true
+      try {
+        if (typeof getRealtimeData === 'function') {
+          const response = await getRealtimeData(this.tsCode)
+          if (response.data.code === 200 && response.data.data) {
+            this.realtimeData = response.data.data
+          } else {
+            console.warn('无实时数据:', response.data.msg)
+            this.realtimeData = []
+          }
+        } else {
+          console.warn('实时数据API未配置')
+          this.realtimeData = []
+        }
+      } catch (error) {
+        console.error('获取实时数据失败:', error)
+        this.realtimeData = []
+      } finally {
+        this.realtimeLoading = false
+      }
+    },
+    
+    startRealtimeTimer() {
+      this.realtimeTimer = setInterval(() => {
+        this.loadRealtimeData()
+      }, 5000) // 每5秒更新一次
+    },
+    
+    clearRealtimeTimer() {
+      if (this.realtimeTimer) {
+        clearInterval(this.realtimeTimer)
+        this.realtimeTimer = null
       }
     },
     
@@ -441,5 +772,15 @@ export default {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+}
+
+.realtime-chart {
+  width: 100%;
+  height: 450px;
+}
+
+.realtime-chart-container {
+  width: 100%;
+  height: 450px;
 }
 </style>

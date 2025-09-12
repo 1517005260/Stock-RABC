@@ -16,9 +16,13 @@ class SysUser(models.Model):
     create_time = models.DateTimeField(null=True, verbose_name="创建时间")
     update_time = models.DateTimeField(null=True, verbose_name="更新时间")
     remark = models.CharField(max_length=500, null=True, verbose_name="备注")
+    is_admin = models.BooleanField(default=False, verbose_name="是否管理员")
 
     class Meta:
         db_table = "sys_user"
+
+    def __str__(self):
+        return self.username
 
 
 class SysUserSerializer(serializers.ModelSerializer):

@@ -38,6 +38,21 @@ const loadUserInfo = async () => {
   }
 }
 
+// 格式化金钱显示
+const formatMoney = (amount) => {
+  if (!amount) return '0.00'
+  return parseFloat(amount).toLocaleString('zh-CN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  })
+}
+
+// 格式化日期显示
+const formatDate = (dateString) => {
+  if (!dateString) return '未知'
+  return new Date(dateString).toLocaleDateString('zh-CN')
+}
+
 onMounted(() => {
   loadUserInfo()
 })
@@ -83,8 +98,20 @@ onMounted(() => {
                     <div class="pull-right">{{ currentUser.roles || '无角色' }}</div>
                   </li>
                   <li class="list-group-item">
+                    <svg-icon icon="money"/>&nbsp;&nbsp;账户余额
+                    <div class="pull-right account-balance">¥{{ formatMoney(currentUser.account_balance || 0) }}</div>
+                  </li>
+                  <li class="list-group-item">
+                    <svg-icon icon="shopping"/>&nbsp;&nbsp;买入交易
+                    <div class="pull-right buy-count">{{ currentUser.buy_count || 0 }}笔</div>
+                  </li>
+                  <li class="list-group-item">
+                    <svg-icon icon="list"/>&nbsp;&nbsp;卖出交易
+                    <div class="pull-right sell-count">{{ currentUser.sell_count || 0 }}笔</div>
+                  </li>
+                  <li class="list-group-item">
                     <svg-icon icon="date"/>&nbsp;&nbsp;创建日期
-                    <div class="pull-right">{{ currentUser.create_time || '未知' }}</div>
+                    <div class="pull-right">{{ formatDate(currentUser.create_time) }}</div>
                   </li>
                 </ul>
               </div>
@@ -141,5 +168,21 @@ onMounted(() => {
 
 ::v-deep .box-card {
   min-height: 450px;
+}
+
+.account-balance {
+  color: #e6a23c !important;
+  font-weight: bold;
+  font-size: 14px;
+}
+
+.buy-count {
+  color: #f56c6c !important;
+  font-weight: bold;
+}
+
+.sell-count {
+  color: #67c23a !important;
+  font-weight: bold;
 }
 </style>

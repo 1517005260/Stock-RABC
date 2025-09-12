@@ -8,12 +8,12 @@ from django.views.decorators.csrf import csrf_exempt
 from django.core.paginator import Paginator
 from django.db.models import Q
 
-from trading.models import (UserStockAccount, UserPosition, TradeRecord, UserWatchList, MarketNews,
+from trading.models import (UserStockAccount, UserPosition, TradeRecord, UserWatchList, MarketNews, AdminOperationLog,
                           UserStockAccountSerializer, UserPositionSerializer, TradeRecordSerializer, 
                           UserWatchListSerializer, MarketNewsSerializer)
-from stock.services import TradingService, UserPermissionService
+from trading.services import TradingService, AdminService, WatchListService
+from stock.services import UserPermissionService
 from stock.models import StockBasic, StockDaily
-from stock.tushare_service import enterprise_finance_service
 from utils.permissions import require_login, admin_required, data_permission_filter
 from user.models import SysUser
 from datetime import datetime
@@ -542,36 +542,18 @@ def admin_user_accounts(request):
         page = int(request.GET.get('page', 1))
         page_size = int(request.GET.get('pageSize', 20))
         
-        # 获取所有用户账户
-        queryset = UserStockAccount.objects.select_related('user').all()
-        
-        # 分页
-        paginator = Paginator(queryset.order_by('-create_time'), page_size)
-        accounts = paginator.get_page(page)
-        
-        result = []
-        for account in accounts:
-            result.append({
-                'user_id': account.user.id,
-                'username': account.user.username,
-                'realname': account.user.realname,
-                'account_balance': float(account.account_balance),
-                'frozen_balance': float(account.frozen_balance),
-                'total_assets': float(account.total_assets),
-                'total_profit': float(account.total_profit),
-                'create_time': account.create_time.strftime('%Y-%m-%d %H:%M:%S'),
-                'update_time': account.update_time.strftime('%Y-%m-%d %H:%M:%S'),
-            })
+        # 使用AdminService获取用户列表
+        result = AdminService.get_user_list(page, page_size)
         
         return JsonResponse({
             'code': 200,
             'msg': '获取成功',
             'data': {
-                'list': result,
-                'total': paginator.count,
-                'page': page,
-                'pageSize': page_size,
-                'totalPages': paginator.num_pages,
+                'list': result['users'],
+                'total': result['total'],
+                'page': result['page'],
+                'pageSize': result['page_size'],
+                'totalPages': (result['total'] + page_size - 1) // page_size,
             }
         })
         
@@ -739,48 +721,25 @@ def admin_user_records(request):
         page = int(request.GET.get('page', 1))
         page_size = int(request.GET.get('pageSize', 20))
         user_id = request.GET.get('user_id')
+        ts_code = request.GET.get('ts_code')
         
-        # 构建查询集
-        if user_id:
-            queryset = TradeRecord.objects.filter(user_id=user_id)
-        else:
-            queryset = TradeRecord.objects.all()
-        
-        # 分页
-        paginator = Paginator(queryset.order_by('-trade_time'), page_size)
-        trades = paginator.get_page(page)
-        
-        # 序列化数据
-        trade_list = []
-        for trade in trades:
-            trade_data = {
-                'id': trade.id,
-                'user_id': trade.user.id,
-                'username': trade.user.username,
-                'ts_code': trade.ts_code,
-                'stock_name': trade.stock_name,
-                'trade_type': trade.trade_type,
-                'trade_type_display': trade.get_trade_type_display(),
-                'trade_price': float(trade.trade_price),
-                'trade_shares': trade.trade_shares,
-                'trade_amount': float(trade.trade_amount),
-                'commission': float(trade.commission),
-                'trade_time': trade.trade_time.strftime('%Y-%m-%d %H:%M:%S'),
-                'status': trade.status,
-                'status_display': trade.get_status_display(),
-                'remark': trade.remark,
-            }
-            trade_list.append(trade_data)
+        # 使用AdminService获取交易记录
+        result = AdminService.get_trading_records(
+            page=page, 
+            page_size=page_size, 
+            user_id=int(user_id) if user_id else None,
+            ts_code=ts_code
+        )
         
         return JsonResponse({
             'code': 200,
             'msg': '获取成功',
             'data': {
-                'list': trade_list,
-                'total': paginator.count,
-                'page': page,
-                'pageSize': page_size,
-                'totalPages': paginator.num_pages,
+                'list': result['trades'],
+                'total': result['total'],
+                'page': result['page'],
+                'pageSize': result['page_size'],
+                'totalPages': (result['total'] + page_size - 1) // page_size,
             }
         })
         
@@ -869,4 +828,329 @@ def admin_adjust_assets(request):
         return JsonResponse({
             'code': 500,
             'msg': f'资产调整失败: {str(e)}'
+        })
+
+
+# ====================新闻管理功能====================
+
+@admin_required
+def admin_news_list(request):
+    """管理员获取新闻列表 - 仅管理员可访问"""
+    try:
+        page = int(request.GET.get('page', 1))
+        page_size = int(request.GET.get('pageSize', 20))
+        category = request.GET.get('category')
+        is_published = request.GET.get('is_published')
+        
+        # 转换is_published参数
+        if is_published is not None:
+            is_published = is_published.lower() == 'true'
+        
+        # 使用AdminService获取新闻列表
+        result = AdminService.get_news_list(
+            page=page, 
+            page_size=page_size, 
+            category=category,
+            is_published=is_published
+        )
+        
+        return JsonResponse({
+            'code': 200,
+            'msg': '获取成功',
+            'data': {
+                'list': result['news'],
+                'total': result['total'],
+                'page': result['page'],
+                'pageSize': result['page_size'],
+                'totalPages': (result['total'] + page_size - 1) // page_size,
+            }
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'code': 500,
+            'msg': f'获取新闻列表失败: {str(e)}'
+        })
+
+
+@admin_required
+@csrf_exempt
+@require_http_methods(["POST"])
+def admin_create_news(request):
+    """管理员创建新闻 - 仅管理员可访问"""
+    try:
+        admin_user = SysUser.objects.get(id=request.user_id)
+        data = json.loads(request.body)
+        
+        title = data.get('title')
+        content = data.get('content')
+        source = data.get('source')
+        category = data.get('category')
+        related_stocks = data.get('related_stocks', [])
+        
+        if not title or not content:
+            return JsonResponse({
+                'code': 400,
+                'msg': '标题和内容不能为空'
+            })
+        
+        # 使用AdminService创建新闻
+        success, message, news = AdminService.create_news(
+            admin_user=admin_user,
+            title=title,
+            content=content,
+            source=source,
+            category=category,
+            related_stocks=related_stocks
+        )
+        
+        if success:
+            return JsonResponse({
+                'code': 200,
+                'msg': message,
+                'data': {
+                    'id': news.id,
+                    'title': news.title
+                }
+            })
+        else:
+            return JsonResponse({
+                'code': 400,
+                'msg': message
+            })
+        
+    except SysUser.DoesNotExist:
+        return JsonResponse({
+            'code': 404,
+            'msg': '管理员用户不存在'
+        })
+    except Exception as e:
+        return JsonResponse({
+            'code': 500,
+            'msg': f'创建新闻失败: {str(e)}'
+        })
+
+
+@admin_required
+@csrf_exempt
+@require_http_methods(["PUT"])
+def admin_update_news(request, news_id):
+    """管理员更新新闻 - 仅管理员可访问"""
+    try:
+        admin_user = SysUser.objects.get(id=request.user_id)
+        data = json.loads(request.body)
+        
+        # 使用AdminService更新新闻
+        success, message = AdminService.update_news(
+            admin_user=admin_user,
+            news_id=news_id,
+            **data
+        )
+        
+        if success:
+            return JsonResponse({
+                'code': 200,
+                'msg': message
+            })
+        else:
+            return JsonResponse({
+                'code': 400,
+                'msg': message
+            })
+        
+    except SysUser.DoesNotExist:
+        return JsonResponse({
+            'code': 404,
+            'msg': '管理员用户不存在'
+        })
+    except Exception as e:
+        return JsonResponse({
+            'code': 500,
+            'msg': f'更新新闻失败: {str(e)}'
+        })
+
+
+@admin_required
+@csrf_exempt
+@require_http_methods(["DELETE"])
+def admin_delete_news(request, news_id):
+    """管理员删除新闻 - 仅管理员可访问"""
+    try:
+        admin_user = SysUser.objects.get(id=request.user_id)
+        
+        # 使用AdminService删除新闻
+        success, message = AdminService.delete_news(
+            admin_user=admin_user,
+            news_id=news_id
+        )
+        
+        if success:
+            return JsonResponse({
+                'code': 200,
+                'msg': message
+            })
+        else:
+            return JsonResponse({
+                'code': 400,
+                'msg': message
+            })
+        
+    except SysUser.DoesNotExist:
+        return JsonResponse({
+            'code': 404,
+            'msg': '管理员用户不存在'
+        })
+    except Exception as e:
+        return JsonResponse({
+            'code': 500,
+            'msg': f'删除新闻失败: {str(e)}'
+        })
+
+
+@admin_required
+def admin_operation_logs(request):
+    """管理员获取操作日志 - 仅管理员可访问"""
+    try:
+        page = int(request.GET.get('page', 1))
+        page_size = int(request.GET.get('pageSize', 20))
+        admin_user_id = request.GET.get('admin_user_id')
+        operation_type = request.GET.get('operation_type')
+        
+        # 使用AdminService获取操作日志
+        result = AdminService.get_operation_logs(
+            page=page,
+            page_size=page_size,
+            admin_user_id=int(admin_user_id) if admin_user_id else None,
+            operation_type=operation_type
+        )
+        
+        return JsonResponse({
+            'code': 200,
+            'msg': '获取成功',
+            'data': {
+                'list': result['logs'],
+                'total': result['total'],
+                'page': result['page'],
+                'pageSize': result['page_size'],
+                'totalPages': (result['total'] + page_size - 1) // page_size,
+            }
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'code': 500,
+            'msg': f'获取操作日志失败: {str(e)}'
+        })
+
+
+@admin_required
+def admin_statistics(request):
+    """管理员获取统计信息 - 仅管理员可访问"""
+    try:
+        from utils.auth_utils import get_client_ip, get_user_agent
+        
+        # 记录操作日志
+        admin_user = SysUser.objects.get(id=request.user_id)
+        AdminService.log_operation(
+            admin_user=admin_user,
+            operation_type='ADMIN_VIEW',
+            operation_desc='查看系统统计信息',
+            ip_address=get_client_ip(request),
+            user_agent=get_user_agent(request)
+        )
+        
+        # 获取统计信息
+        stats = AdminService.get_statistics()
+        
+        return JsonResponse({
+            'code': 200,
+            'msg': '获取成功',
+            'data': stats
+        })
+        
+    except SysUser.DoesNotExist:
+        return JsonResponse({
+            'code': 404,
+            'msg': '管理员用户不存在'
+        })
+    except Exception as e:
+        return JsonResponse({
+            'code': 500,
+            'msg': f'获取统计信息失败: {str(e)}'
+        })
+
+
+@require_login
+def get_news_list(request):
+    """获取新闻列表 - 所有用户可访问"""
+    try:
+        page = int(request.GET.get('page', 1))
+        page_size = int(request.GET.get('pageSize', 20))
+        category = request.GET.get('category')
+        
+        # 只显示已发布的新闻
+        result = AdminService.get_news_list(
+            page=page,
+            page_size=page_size,
+            category=category,
+            is_published=True
+        )
+        
+        return JsonResponse({
+            'code': 200,
+            'msg': '获取成功',
+            'data': {
+                'list': result['news'],
+                'total': result['total'],
+                'page': result['page'],
+                'pageSize': result['page_size'],
+                'totalPages': (result['total'] + page_size - 1) // page_size,
+            }
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'code': 500,
+            'msg': f'获取新闻列表失败: {str(e)}'
+        })
+
+
+@require_login
+def get_news_detail(request, news_id):
+    """获取新闻详情 - 所有用户可访问"""
+    try:
+        try:
+            news = MarketNews.objects.get(id=news_id, is_published=True)
+            
+            # 增加阅读次数
+            news.read_count += 1
+            news.save()
+            
+            news_data = {
+                'id': news.id,
+                'title': news.title,
+                'content': news.content,
+                'source': news.source,
+                'category': news.category,
+                'related_stocks': news.related_stocks,
+                'publish_time': news.publish_time.strftime('%Y-%m-%d %H:%M:%S'),
+                'read_count': news.read_count,
+            }
+            
+            return JsonResponse({
+                'code': 200,
+                'msg': '获取成功',
+                'data': news_data
+            })
+            
+        except MarketNews.DoesNotExist:
+            return JsonResponse({
+                'code': 404,
+                'msg': '新闻不存在或未发布'
+            })
+        
+    except Exception as e:
+        return JsonResponse({
+            'code': 500,
+            'msg': f'获取新闻详情失败: {str(e)}'
         })

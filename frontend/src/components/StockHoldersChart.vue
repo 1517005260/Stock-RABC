@@ -1,8 +1,5 @@
 <template>
   <div class="stock-holders-container">
-    <div class="chart-header">
-      <h3>股权占比</h3>
-    </div>
     <div 
       ref="chartContainer" 
       class="chart-container"
@@ -88,38 +85,61 @@ export default {
     },
     
     renderChart() {
-      if (!this.chart || !this.holdersData.length) return
+      if (!this.chart || !this.holdersData || !Array.isArray(this.holdersData) || !this.holdersData.length) return
+      
+      // 过滤和验证数据
+      const validData = this.holdersData.filter(item => 
+        item && 
+        typeof item === 'object' && 
+        item.name && 
+        typeof item.percentage === 'number' && 
+        !isNaN(item.percentage)
+      )
+      
+      if (validData.length === 0) {
+        // 如果没有有效数据，显示空状态
+        const emptyOption = {
+          title: {
+            text: '暂无持股数据',
+            left: 'center',
+            top: 'middle',
+            textStyle: {
+              color: '#999',
+              fontSize: 14
+            }
+          },
+          series: []
+        }
+        this.chart.setOption(emptyOption, true)
+        return
+      }
       
       const option = {
-        title: {
-          text: '股权占比',
-          left: 'center',
-          textStyle: {
-            color: '#333',
-            fontSize: 14
-          }
-        },
         tooltip: {
           trigger: 'item',
           formatter: '{a} <br/>{b}: {c}% ({d}%)'
         },
         legend: {
           orient: 'vertical',
-          left: 'left',
-          data: this.holdersData.map(item => item.name),
+          left: '10px',
+          top: '20px',
+          data: validData.map(item => item.name),
           textStyle: {
             fontSize: 12
-          }
+          },
+          itemWidth: 14,
+          itemHeight: 14,
+          itemGap: 8
         },
         series: [
           {
             name: '持股比例',
             type: 'pie',
-            radius: '55%',
-            center: ['60%', '60%'],
-            data: this.holdersData.map(item => ({
+            radius: ['20%', '40%'],
+            center: ['65%', '80%'],
+            data: validData.map(item => ({
               name: item.name,
-              value: item.percentage
+              value: parseFloat(item.percentage) || 0
             })),
             emphasis: {
               itemStyle: {
@@ -130,10 +150,13 @@ export default {
             },
             label: {
               show: true,
-              formatter: '{b}: {c}%'
+              formatter: '{c}%',
+              fontSize: 12
             },
             labelLine: {
-              show: true
+              show: true,
+              length: 10,
+              length2: 10
             }
           }
         ],
@@ -155,18 +178,6 @@ export default {
   background: #fff;
   border-radius: 4px;
   padding: 10px;
-}
-
-.chart-header {
-  text-align: center;
-  margin-bottom: 10px;
-}
-
-.chart-header h3 {
-  margin: 0;
-  color: #333;
-  font-size: 16px;
-  font-weight: 500;
 }
 
 .chart-container {

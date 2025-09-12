@@ -2,7 +2,7 @@
 
 import json
 from decimal import Decimal
-from datetime import datetime
+from datetime import datetime, timedelta
 from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
@@ -10,11 +10,26 @@ from django.core.paginator import Paginator
 from django.db.models import Q
 
 from stock.models import StockBasic, StockDaily, StockCompany, StockBasicSerializer, StockDailySerializer, StockCompanySerializer
-from stock.services import StockDataService, TradingService, UserPermissionService, RealTimeDataService
+from stock.services import StockDataService, UserPermissionService, RealTimeDataService, IntradayDataService
+from trading.services import TradingService
 from stock.tushare_service import EnterpriseFinanceDataService
 enterprise_finance_service = EnterpriseFinanceDataService()
 from utils.permissions import require_role, require_login, admin_required, superadmin_required
 from user.models import SysUser
+
+# 导入Tushare
+import os
+import tushare as ts
+from dotenv import load_dotenv
+
+# 加载环境变量并初始化Tushare
+load_dotenv()
+token = os.getenv('TUSHARE_TOKEN')
+if token:
+    ts.set_token(token)
+    pro = ts.pro_api()
+else:
+    pro = None
 
 
 @require_login
@@ -352,19 +367,19 @@ def stock_realtime_data(request, ts_code):
 
 @require_login
 def stock_intraday_chart(request, ts_code):
-    """获取股票分时图数据 - 所有用户可访问，支持5秒刷新"""
+    """获取股票分时图数据 - 使用多数据源策略，只返回真实数据"""
     try:
-        result = RealTimeDataService.get_intraday_chart_data(ts_code)
+        result = IntradayDataService.get_stock_intraday_multi_source(ts_code)
         
         if result['success']:
             return JsonResponse({
                 'code': 200,
-                'msg': '获取成功',
+                'msg': f'获取成功 (数据源: {result.get("source", "unknown")})',
                 'data': result['data']
             })
         else:
             return JsonResponse({
-                'code': 500,
+                'code': 404,
                 'msg': result['message']
             })
             
@@ -439,78 +454,161 @@ def stock_kline_data(request, ts_code):
         # 限制数据条数
         limit = min(limit, 2000)
         
-        # 获取股票基本信息，如果不存在则尝试同步
-        try:
-            stock = StockBasic.objects.get(ts_code=ts_code)
-        except StockBasic.DoesNotExist:
-            # 股票不存在，尝试同步股票基本信息
-            sync_result = StockDataService.sync_stock_basic()
-            if sync_result['success']:
-                try:
-                    stock = StockBasic.objects.get(ts_code=ts_code)
-                except StockBasic.DoesNotExist:
+        # 检查是否为指数代码（上证指数、深证指数等）
+        is_index = ts_code in ['000001.SH', '399001.SZ', '399006.SZ', '000300.SH', '000905.SH']
+        
+        if is_index:
+            # 指数数据直接从Tushare获取，不存储在本地
+            try:
+                if not pro:
+                    return JsonResponse({
+                        'code': 500,
+                        'msg': 'Tushare API未配置，无法获取指数数据'
+                    })
+                
+                # 计算日期范围
+                end_date = datetime.now().strftime('%Y%m%d')
+                start_date = (datetime.now() - timedelta(days=limit * 2)).strftime('%Y%m%d')
+                
+                # 获取指数日线数据
+                df = pro.index_daily(
+                    ts_code=ts_code,
+                    start_date=start_date,
+                    end_date=end_date,
+                    fields='ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount'
+                )
+                
+                if df.empty:
                     return JsonResponse({
                         'code': 404,
-                        'msg': f'股票代码 {ts_code} 不存在于Tushare数据库中'
+                        'msg': f'无法获取指数 {ts_code} 的K线数据'
                     })
-            else:
+                
+                # 转换为前端需要的格式
+                kline_data = []
+                for _, row in df.iterrows():
+                    try:
+                        kline_data.append({
+                            'date': datetime.strptime(str(row['trade_date']), '%Y%m%d').strftime('%Y-%m-%d'),
+                            'open': float(row['open']) if row['open'] else 0,
+                            'high': float(row['high']) if row['high'] else 0,
+                            'low': float(row['low']) if row['low'] else 0,
+                            'close': float(row['close']) if row['close'] else 0,
+                            'volume': int(row['vol']) if row['vol'] else 0,
+                            'amount': float(row['amount']) if row['amount'] else 0,
+                            'change': float(row['change']) if row['change'] else 0,
+                            'pct_chg': float(row['pct_chg']) if row['pct_chg'] else 0,
+                            'pre_close': float(row['pre_close']) if row['pre_close'] else 0
+                        })
+                    except (ValueError, TypeError) as e:
+                        continue
+                
+                # 按日期正序排列
+                kline_data.sort(key=lambda x: x['date'])
+                
+                # 限制返回数量
+                result_data = kline_data[-limit:] if limit and len(kline_data) > limit else kline_data
+                
+                # 获取指数名称
+                index_names = {
+                    '000001.SH': '上证指数',
+                    '399001.SZ': '深证成指', 
+                    '399006.SZ': '创业板指',
+                    '000300.SH': '沪深300',
+                    '000905.SH': '中证500'
+                }
+                stock_name = index_names.get(ts_code, ts_code)
+                
+                return JsonResponse({
+                    'code': 200,
+                    'msg': '获取成功',
+                    'data': {
+                        'ts_code': ts_code,
+                        'name': stock_name,
+                        'period': period,
+                        'adjust': adjust,
+                        'count': len(result_data),
+                        'kline_data': result_data,
+                        'latest_info': result_data[-1] if result_data else None,
+                        'data_source': 'tushare_index_api'
+                    }
+                })
+                
+            except Exception as e:
                 return JsonResponse({
                     'code': 500,
-                    'msg': f'同步股票数据失败: {sync_result["message"]}'
+                    'msg': f'获取指数数据失败: {str(e)}'
                 })
-        
-        # 检查是否有K线数据，如果没有则同步
-        daily_data = StockDaily.objects.filter(ts_code=ts_code).order_by('-trade_date')
-        if not daily_data.exists():
-            # 没有K线数据，从Tushare同步
-            sync_result = StockDataService.sync_stock_daily(ts_code, days=90)  # 同步3个月数据
-            if sync_result['success']:
-                daily_data = StockDaily.objects.filter(ts_code=ts_code).order_by('-trade_date')
-            else:
-                return JsonResponse({
-                    'code': 500,
-                    'msg': f'同步股票日线数据失败: {sync_result["message"]}'
-                })
-        
-        # 获取K线数据
-        if period == 'daily':
-            # 日K线数据
-            daily_data = daily_data[:limit]
-            kline_data = []
-            
-            for daily in reversed(daily_data):  # 按时间正序
-                kline_data.append({
-                    'date': daily.trade_date.strftime('%Y-%m-%d'),
-                    'open': float(daily.open) if daily.open else 0,
-                    'high': float(daily.high) if daily.high else 0,
-                    'low': float(daily.low) if daily.low else 0,
-                    'close': float(daily.close) if daily.close else 0,
-                    'volume': daily.vol if daily.vol else 0,
-                    'amount': float(daily.amount) if daily.amount else 0,
-                    'change': float(daily.change) if daily.change else 0,
-                    'pct_chg': float(daily.pct_chg) if daily.pct_chg else 0,
-                    'pre_close': float(daily.pre_close) if daily.pre_close else 0
-                })
-        
-        elif period == 'weekly':
-            # 周K线数据（基于日K线聚合）
-            kline_data = generate_weekly_kline(ts_code, limit)
-            
-        elif period == 'monthly':
-            # 月K线数据（基于日K线聚合）
-            kline_data = generate_monthly_kline(ts_code, limit)
-            
         else:
-            return JsonResponse({
-                'code': 400,
-                'msg': '不支持的周期类型'
-            })
+            # 股票数据的原有逻辑
+            # 获取股票基本信息，如果不存在则尝试同步
+            try:
+                stock = StockBasic.objects.get(ts_code=ts_code)
+                stock_name = stock.name
+            except StockBasic.DoesNotExist:
+                # 股票不存在，尝试同步股票基本信息
+                sync_result = StockDataService.sync_stock_basic()
+                if sync_result['success']:
+                    try:
+                        stock = StockBasic.objects.get(ts_code=ts_code)
+                        stock_name = stock.name
+                    except StockBasic.DoesNotExist:
+                        return JsonResponse({
+                            'code': 404,
+                            'msg': f'股票代码 {ts_code} 不存在于Tushare数据库中'
+                        })
+                else:
+                    return JsonResponse({
+                        'code': 500,
+                        'msg': f'同步股票数据失败: {sync_result["message"]}'
+                    })
+            
+            # 检查是否有K线数据，如果没有则同步
+            daily_data = StockDaily.objects.filter(ts_code=ts_code).order_by('-trade_date')
+            if not daily_data.exists():
+                # 没有K线数据，从Tushare同步
+                sync_result = StockDataService.sync_stock_daily(ts_code, days=90)  # 同步3个月数据
+                if sync_result['success']:
+                    daily_data = StockDaily.objects.filter(ts_code=ts_code).order_by('-trade_date')
+                else:
+                    return JsonResponse({
+                        'code': 500,
+                        'msg': f'同步股票日线数据失败: {sync_result["message"]}'
+                    })
+            
+            # 获取K线数据
+            if period == 'daily':
+                # 日K线数据
+                daily_data = daily_data[:limit]
+                kline_data = []
+                
+                for daily in reversed(daily_data):  # 按时间正序
+                    kline_data.append({
+                        'date': daily.trade_date.strftime('%Y-%m-%d'),
+                        'open': float(daily.open) if daily.open else 0,
+                        'high': float(daily.high) if daily.high else 0,
+                        'low': float(daily.low) if daily.low else 0,
+                        'close': float(daily.close) if daily.close else 0,
+                        'volume': daily.vol if daily.vol else 0,
+                        'amount': float(daily.amount) if daily.amount else 0,
+                        'change': float(daily.change) if daily.change else 0,
+                        'pct_chg': float(daily.pct_chg) if daily.pct_chg else 0,
+                        'pre_close': float(daily.pre_close) if daily.pre_close else 0
+                    })
+            
+            elif period == 'weekly':
+                # 周K线数据（基于日K线聚合）
+                kline_data = generate_weekly_kline(ts_code, limit)
+                
+            elif period == 'monthly':
+                # 月K线数据（基于日K线聚合）
+                kline_data = generate_monthly_kline(ts_code, limit)
         
         # 如果仍然没有数据
         if not kline_data:
             return JsonResponse({
                 'code': 404,
-                'msg': f'未找到股票 {ts_code} 的K线数据'
+                'msg': f'未找到 {ts_code} 的K线数据'
             })
         
         # 计算技术指标
@@ -521,14 +619,14 @@ def stock_kline_data(request, ts_code):
             'msg': '获取成功',
             'data': {
                 'ts_code': ts_code,
-                'name': stock.name,
+                'name': stock_name,
                 'period': period,
                 'adjust': adjust,
                 'count': len(kline_data),
                 'kline_data': kline_data,
                 'technical_indicators': technical_indicators,
                 'latest_info': kline_data[-1] if kline_data else None,
-                'data_source': 'tushare_real'
+                'data_source': 'tushare_api' if is_index else 'tushare_real'
             }
         })
         
@@ -1169,25 +1267,22 @@ def get_realtime_data(request, ts_code):
 @require_login
 def get_intraday_chart(request, ts_code):
     """
-    获取分时图数据
+    获取分时图数据 - 使用多数据源策略，只返回真实数据
     """
     try:
-        intraday_data = enterprise_finance_service.get_intraday_ticks(ts_code)
+        result = IntradayDataService.get_stock_intraday_multi_source(ts_code)
         
-        if not intraday_data:
+        if result['success']:
+            return JsonResponse({
+                'code': 200,
+                'msg': f'获取成功 (数据源: {result.get("source", "unknown")})',
+                'data': result['data']
+            })
+        else:
             return JsonResponse({
                 'code': 404,
-                'msg': '暂无分时数据'
+                'msg': result['message']
             })
-        
-        return JsonResponse({
-            'code': 200,
-            'msg': '获取成功',
-            'data': {
-                'time': intraday_data['time'],
-                'price': intraday_data['price']
-            }
-        })
         
     except Exception as e:
         return JsonResponse({
@@ -1238,17 +1333,110 @@ def get_stock_holders(request, ts_code):
 @require_login
 def get_hot_stocks(request):
     """
-    获取热门股票
+    获取热门股票 - 真正的每日涨幅榜
     """
     try:
         limit = int(request.GET.get('limit', 10))
-        hot_stocks = enterprise_finance_service.get_top_gainers(limit)
         
-        return JsonResponse({
-            'code': 200,
-            'msg': '获取成功',
-            'data': hot_stocks
-        })
+        # 尝试从数据库获取最新交易日数据
+        latest_date = StockDaily.objects.values('trade_date').order_by('-trade_date').first()
+        
+        if not latest_date:
+            # 如果数据库中没有数据，尝试从Tushare获取今日数据
+            try:
+                if not pro:  # 如果没有配置Tushare
+                    return JsonResponse({
+                        'code': 500,
+                        'msg': 'Tushare API未配置，请联系管理员配置TUSHARE_TOKEN'
+                    })
+                
+                # 获取今日股票数据
+                today = datetime.now().strftime('%Y%m%d')
+                df = pro.daily(
+                    trade_date=today,
+                    fields='ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount'
+                )
+                
+                if df.empty:
+                    # 尝试前一交易日
+                    yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y%m%d')
+                    df = pro.daily(
+                        trade_date=yesterday,
+                        fields='ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount'
+                    )
+                
+                if df.empty:
+                    return JsonResponse({
+                        'code': 404,
+                        'msg': '暂无最新交易数据'
+                    })
+                
+                # 筛选涨幅榜 - 真正的每日涨幅最大股票
+                filtered_df = df[
+                    (df['pct_chg'].notna()) & 
+                    (df['pct_chg'] > 0) &  # 只要上涨的
+                    (df['vol'] > 0) &  # 有成交量
+                    (~df['ts_code'].str.contains('ST', na=False))  # 排除ST股票
+                ].sort_values('pct_chg', ascending=False).head(limit)
+                
+                if filtered_df.empty:
+                    # 如果没有上涨股票，返回涨跌幅最大的
+                    filtered_df = df[
+                        (df['pct_chg'].notna()) & 
+                        (df['vol'] > 0)
+                    ].sort_values('pct_chg', ascending=False).head(limit)
+                
+                # 获取股票名称
+                ts_codes = ','.join(filtered_df['ts_code'].tolist())
+                stock_basic = pro.stock_basic(
+                    ts_code=ts_codes,
+                    fields='ts_code,name,industry'
+                )
+                
+                # 构建返回数据
+                hot_stocks = []
+                for _, row in filtered_df.iterrows():
+                    basic_info = stock_basic[stock_basic['ts_code'] == row['ts_code']]
+                    if not basic_info.empty:
+                        basic = basic_info.iloc[0]
+                        hot_stocks.append({
+                            'ts_code': row['ts_code'],
+                            'name': basic['name'],
+                            'industry': basic['industry'] if basic['industry'] else '未分类',
+                            'close': float(row['close']),
+                            'change': float(row['change']),
+                            'pct_chg': float(row['pct_chg']),
+                            'vol': int(row['vol']),
+                            'amount': float(row['amount']),
+                            'trade_date': datetime.strptime(str(row['trade_date']), '%Y%m%d').strftime('%Y-%m-%d')
+                        })
+                
+                return JsonResponse({
+                    'code': 200,
+                    'msg': '获取成功',
+                    'data': hot_stocks
+                })
+                
+            except Exception as api_error:
+                return JsonResponse({
+                    'code': 500,
+                    'msg': f'获取实时热门股票失败: {str(api_error)}'
+                })
+        
+        # 使用数据库数据获取热门股票
+        try:
+            hot_stocks = StockDataService.get_top_stocks(limit)
+            
+            return JsonResponse({
+                'code': 200,
+                'msg': '获取成功',
+                'data': hot_stocks
+            })
+        except Exception as service_error:
+            return JsonResponse({
+                'code': 500,
+                'msg': f'获取数据库热门股票失败: {str(service_error)}'
+            })
         
     except Exception as e:
         return JsonResponse({

@@ -23,7 +23,7 @@
         <el-card>
           <template #header>
             <div class="card-header">
-              <span>热门牛股</span>
+              <span>今日涨幅榜</span>
               <el-button text @click="refreshHotStocks">
                 <el-icon><Refresh /></el-icon>
                 刷新
@@ -35,13 +35,13 @@
             style="width: 100%"
             size="small"
             @row-click="goToStock"
-            row-style="cursor: pointer"
+            :row-style="{cursor: 'pointer'}"
           >
             <el-table-column prop="name" label="股票" width="80" />
-            <el-table-column prop="current_price" label="现价" width="70" align="right">
+            <el-table-column prop="close" label="现价" width="70" align="right">
               <template #default="scope">
                 <span :class="getPriceClass(scope.row.pct_chg)">
-                  {{ scope.row.current_price }}
+                  {{ scope.row.close }}
                 </span>
               </template>
             </el-table-column>
@@ -261,6 +261,7 @@ import {
   getMarketOverview,
   getStockKlineData
 } from '@/api/stock'
+import wsService from '@/utils/websocket'
 
 use([
   CanvasRenderer,
@@ -309,10 +310,25 @@ export default {
   },
   computed: {
     marketChartOption() {
-      if (!this.marketChartData.length) return {}
+      if (!this.marketChartData || !Array.isArray(this.marketChartData) || !this.marketChartData.length) {
+        return {}
+      }
       
-      const dates = this.marketChartData.map(item => item.date)
-      const values = this.marketChartData.map(item => item.close)
+      // 过滤和验证数据
+      const validData = this.marketChartData.filter(item => 
+        item && 
+        typeof item === 'object' && 
+        item.date && 
+        item.close != null && 
+        !isNaN(parseFloat(item.close))
+      )
+      
+      if (validData.length === 0) {
+        return {}
+      }
+      
+      const dates = validData.map(item => item.date)
+      const values = validData.map(item => parseFloat(item.close))
       
       return {
         grid: {
@@ -332,8 +348,9 @@ export default {
         },
         series: [
           {
+            name: '大盘走势',
             type: 'line',
-            data: values,
+            data: values.filter(val => val != null && !isNaN(val)),
             smooth: true,
             symbol: 'none',
             lineStyle: {
@@ -361,9 +378,11 @@ export default {
   async created() {
     await this.loadDashboardData()
     this.startAutoRefresh()
+    this.initWebSocket()
   },
   beforeUnmount() {
     this.stopAutoRefresh()
+    this.disconnectWebSocket()
   },
   methods: {
     async loadDashboardData() {
@@ -384,8 +403,10 @@ export default {
     async getHotStocksList() {
       try {
         const response = await getHotStocks({ limit: 10 })
+        console.log('热门股票响应:', response.data) // 调试日志
         if (response.data.code === 200) {
-          this.hotStocks = response.data.data
+          this.hotStocks = response.data.data || []
+          console.log('热门股票数据:', this.hotStocks) // 调试日志
         }
       } catch (error) {
         console.error('获取热门股票失败:', error)
@@ -409,18 +430,44 @@ export default {
         // 获取上证指数数据作为大盘走势
         const response = await getStockKlineData('000001.SH', {
           period: 'daily',
-          limit: this.chartPeriod === '1D' ? 1 : this.chartPeriod === '5D' ? 5 : 30
+          limit: this.chartPeriod === '1D' ? 30 : this.chartPeriod === '5D' ? 5 : 30
         })
-        if (response.data.code === 200) {
-          this.marketChartData = response.data.data.kline_data || []
+        
+        console.log('大盘数据响应:', response.data) // 调试日志
+        
+        if (response.data.code === 200 && response.data.data) {
+          // 处理K线数据格式
+          const klineData = response.data.data.kline_data || []
+          
+          if (klineData.length === 0) {
+            throw new Error('返回的K线数据为空')
+          }
+          
+          // 转换为大盘走势图所需的格式
+          this.marketChartData = klineData.map(item => ({
+            date: item.date,
+            close: item.close,
+            open: item.open,
+            high: item.high,
+            low: item.low,
+            volume: item.volume,
+            change: item.change,
+            pct_chg: item.pct_chg
+          }))
+          
+          console.log('处理后的大盘数据:', this.marketChartData) // 调试日志
+        } else {
+          throw new Error(response.data.msg || '获取大盘数据失败')
         }
       } catch (error) {
         console.error('获取市场图表数据失败:', error)
-        this.$message.error('获取市场图表数据失败，请检查网络连接')
+        this.$message.error(`获取市场图表数据失败: ${error.message}`)
+        this.marketChartData = []
       } finally {
         this.chartLoading = false
       }
     },
+    
     loadWatchlist() {
       const saved = localStorage.getItem('stock_watchlist')
       if (saved) {
@@ -431,7 +478,7 @@ export default {
     },
     async refreshHotStocks() {
       await this.getHotStocksList()
-      this.$message.success('已刷新热门股票')
+      this.$message.success('已刷新今日涨幅榜')
     },
     async refreshNews() {
       this.$router.push('/stock/news')
@@ -505,6 +552,75 @@ export default {
         return (value / 10000).toFixed(2) + '万'
       }
       return value.toLocaleString()
+    },
+    
+    // WebSocket 相关方法
+    async initWebSocket() {
+      try {
+        await wsService.connect()
+        
+        // 添加消息处理器
+        wsService.addMessageHandler('market_data', this.handleMarketData)
+        wsService.addMessageHandler('realtime_data', this.handleRealtimeData)
+        wsService.addMessageHandler('news_update', this.handleNewsUpdate)
+        
+        // 订阅热门股票实时数据
+        if (this.hotStocks.length > 0) {
+          const tsCodes = this.hotStocks.map(stock => stock.ts_code)
+          wsService.subscribe(tsCodes)
+        }
+        
+        console.log('WebSocket连接并订阅成功')
+      } catch (error) {
+        console.error('WebSocket连接失败:', error)
+        this.$message.warning('实时数据连接失败，将使用定时刷新模式')
+      }
+    },
+    
+    disconnectWebSocket() {
+      // 移除消息处理器
+      wsService.removeMessageHandler('market_data', this.handleMarketData)
+      wsService.removeMessageHandler('realtime_data', this.handleRealtimeData) 
+      wsService.removeMessageHandler('news_update', this.handleNewsUpdate)
+    },
+    
+    handleMarketData(data) {
+      // 处理市场概况数据
+      if (data.indices) {
+        this.marketIndices = data.indices
+      }
+      if (data.market_stats) {
+        this.marketStats = data.market_stats
+      }
+      if (data.hot_stocks) {
+        this.hotStocks = data.hot_stocks
+      }
+    },
+    
+    handleRealtimeData(data) {
+      // 处理实时股票数据，更新热门股票列表中的价格
+      if (Array.isArray(data)) {
+        data.forEach(stockData => {
+          const index = this.hotStocks.findIndex(stock => stock.ts_code === stockData.ts_code)
+          if (index !== -1) {
+            this.hotStocks[index] = {
+              ...this.hotStocks[index],
+              current_price: stockData.current_price,
+              change: stockData.change,
+              pct_chg: stockData.pct_chg
+            }
+          }
+        })
+      }
+    },
+    
+    handleNewsUpdate(data) {
+      // 处理新闻更新
+      if (data.type === 'new_news' && Array.isArray(data.news)) {
+        // 将新闻插入到列表前面，保持最新的在顶部
+        this.latestNews = [...data.news, ...this.latestNews].slice(0, 8)
+        this.$message.info('收到新的市场资讯')
+      }
     }
   }
 }

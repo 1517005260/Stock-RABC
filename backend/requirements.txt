@@ -26,5 +26,8 @@ tushare>=1.2.89
 pandas>=1.5.0
 numpy>=1.21.0
 
+# 中国节假日检测
+chinese_calendar>=1.9.0
+
 # 数学计算和统计
 scipy>=1.9.0

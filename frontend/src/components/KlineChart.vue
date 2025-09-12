@@ -159,7 +159,26 @@ export default {
     renderKlineChart() {
       if (!this.chart || !this.klineData) return
       
+      // 验证数据结构
       const { dates, kline, ma5, ma10, ma20, ma30 } = this.klineData
+      
+      if (!Array.isArray(dates) || !Array.isArray(kline) || dates.length === 0 || kline.length === 0) {
+        // 如果没有有效数据，显示空状态
+        const emptyOption = {
+          title: {
+            text: '暂无K线数据',
+            left: 'center',
+            top: 'middle',
+            textStyle: {
+              color: '#999',
+              fontSize: 16
+            }
+          },
+          series: []
+        }
+        this.chart.setOption(emptyOption, true)
+        return
+      }
 
       const option = {
         title: {
@@ -230,7 +249,7 @@ export default {
           {
             name: '日K',
             type: 'candlestick',
-            data: kline,
+            data: Array.isArray(kline) ? kline.filter(item => item && Array.isArray(item) && item.length >= 4) : [],
             itemStyle: {
               color: this.upColor,
               color0: this.downColor,
@@ -280,7 +299,7 @@ export default {
           {
             name: 'MA5',
             type: 'line',
-            data: ma5,
+            data: Array.isArray(ma5) ? ma5.filter(item => item != null && !isNaN(item)) : [],
             smooth: true,
             lineStyle: {
               opacity: 0.5,
@@ -291,7 +310,7 @@ export default {
           {
             name: 'MA10',
             type: 'line',
-            data: ma10,
+            data: Array.isArray(ma10) ? ma10.filter(item => item != null && !isNaN(item)) : [],
             smooth: true,
             lineStyle: {
               opacity: 0.5,
@@ -302,7 +321,7 @@ export default {
           {
             name: 'MA20',
             type: 'line',
-            data: ma20,
+            data: Array.isArray(ma20) ? ma20.filter(item => item != null && !isNaN(item)) : [],
             smooth: true,
             lineStyle: {
               opacity: 0.5,
@@ -313,7 +332,7 @@ export default {
           {
             name: 'MA30',
             type: 'line',
-            data: ma30,
+            data: Array.isArray(ma30) ? ma30.filter(item => item != null && !isNaN(item)) : [],
             smooth: true,
             lineStyle: {
               opacity: 0.5,
@@ -331,6 +350,64 @@ export default {
       if (!this.chart || !this.realtimeData) return
       
       const { time, price } = this.realtimeData
+      
+      // 验证数据结构
+      if (!Array.isArray(time) || !Array.isArray(price) || time.length === 0 || price.length === 0) {
+        // 按照sample项目的方式处理空数据情况
+        const emptyOption = {
+          title: {
+            text: '暂无分时数据',
+            left: 'center',
+            top: 'middle',
+            textStyle: {
+              color: '#999',
+              fontSize: 16
+            }
+          },
+          xAxis: {
+            type: 'category',
+            data: [],
+            show: false
+          },
+          yAxis: {
+            type: 'value',
+            show: false
+          },
+          series: [
+            {
+              name: '暂无数据',
+              type: 'line',
+              data: [],
+              showSymbol: false
+            }
+          ]
+        }
+        this.chart.setOption(emptyOption, true)
+        return
+      }
+      
+      // 格式化时间显示：将091505格式转换为09:15格式
+      const formatTimeDisplay = (timeStr) => {
+        if (!timeStr) return timeStr
+        
+        // 如果是091505这种6位格式，转换为09:15
+        if (typeof timeStr === 'string' && timeStr.length === 6 && /^\d{6}$/.test(timeStr)) {
+          const hours = timeStr.substring(0, 2)
+          const minutes = timeStr.substring(2, 4)
+          return `${hours}:${minutes}`
+        }
+        
+        // 如果是09:15这种格式，直接返回
+        if (typeof timeStr === 'string' && timeStr.includes(':')) {
+          return timeStr
+        }
+        
+        // 其他格式尝试转换
+        return timeStr
+      }
+      
+      // 格式化时间数据
+      const formattedTimes = time.map(item => formatTimeDisplay(item))
       
       // 分时图配置
       const option = {
@@ -356,7 +433,7 @@ export default {
         },
         xAxis: {
           type: 'category',
-          data: time,
+          data: formattedTimes,
           boundaryGap: false
         },
         yAxis: {
@@ -365,8 +442,9 @@ export default {
         },
         series: [
           {
+            name: '分时价格',
             type: 'line',
-            data: price,
+            data: Array.isArray(price) ? price.filter(item => item != null && !isNaN(item)) : [],
             smooth: true,
             symbol: 'none',
             lineStyle: {

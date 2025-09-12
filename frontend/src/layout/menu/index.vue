@@ -19,6 +19,58 @@
       </el-icon>
       <span>AI聊天助手</span>
     </el-menu-item>
+
+    <!-- 股票交易模块 -->
+    <el-sub-menu index="/stock">
+      <template #title>
+        <el-icon>
+          <svg-icon icon="stock" />
+        </el-icon>
+        <span>股票交易</span>
+      </template>
+      <el-menu-item index="/stock/dashboard" @click="openTab({name:'股票首页', path:'/stock/dashboard'})">
+        <el-icon>
+          <svg-icon icon="dashboard"/>
+        </el-icon>
+        <span>股票首页</span>
+      </el-menu-item>
+      <el-menu-item index="/stock/list" @click="openTab({name:'股票列表', path:'/stock/list'})">
+        <el-icon>
+          <svg-icon icon="list"/>
+        </el-icon>
+        <span>股票列表</span>
+      </el-menu-item>
+      <el-menu-item index="/stock/watchlist" @click="openTab({name:'自选股票', path:'/stock/watchlist'})">
+        <el-icon>
+          <svg-icon icon="star"/>
+        </el-icon>
+        <span>自选股票</span>
+      </el-menu-item>
+      <el-menu-item index="/stock/positions" @click="openTab({name:'持仓管理', path:'/stock/positions'})">
+        <el-icon>
+          <svg-icon icon="wallet"/>
+        </el-icon>
+        <span>持仓管理</span>
+      </el-menu-item>
+      <el-menu-item index="/stock/records" @click="openTab({name:'交易记录', path:'/stock/records'})">
+        <el-icon>
+          <svg-icon icon="document"/>
+        </el-icon>
+        <span>交易记录</span>
+      </el-menu-item>
+      <el-menu-item index="/stock/account" @click="openTab({name:'账户总览', path:'/stock/account'})">
+        <el-icon>
+          <svg-icon icon="money"/>
+        </el-icon>
+        <span>账户总览</span>
+      </el-menu-item>
+      <el-menu-item index="/stock/news" @click="openTab({name:'股票新闻', path:'/stock/news'})">
+        <el-icon>
+          <svg-icon icon="news"/>
+        </el-icon>
+        <span>股票新闻</span>
+      </el-menu-item>
+    </el-sub-menu>
     <el-sub-menu index="/sys" v-if="hasAdminPermission">
       <template #title>
         <el-icon>

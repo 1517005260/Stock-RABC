@@ -33,6 +33,9 @@ from role.models import SysRole, SysUserRole
 from stock.models import StockBasic, StockDaily, StockCompany
 from trading.models import UserStockAccount, UserPosition, TradeRecord, UserWatchList, MarketNews
 
+import shutup
+shutup.please()
+
 
 def reset_database():
     """重置数据库文件"""
@@ -90,6 +93,8 @@ def create_roles():
             code=role_data['code'],
             defaults={
                 'name': role_data['name'],
+                'role_sort': 1,
+                'status': 0,
                 'remark': role_data['remark'],
                 'create_time': datetime.now(),
                 'update_time': datetime.now()

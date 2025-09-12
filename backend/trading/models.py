@@ -124,6 +124,8 @@ class MarketNews(models.Model):
     category = models.CharField(max_length=20, null=True, blank=True, verbose_name='新闻分类')
     related_stocks = models.JSONField(null=True, blank=True, verbose_name='相关股票代码')
     create_time = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    created_by = models.ForeignKey(SysUser, on_delete=models.SET_NULL, null=True, verbose_name='创建者')
+    is_published = models.BooleanField(default=True, verbose_name='是否发布')
 
     class Meta:
         db_table = 'market_news'
@@ -132,11 +134,49 @@ class MarketNews(models.Model):
         indexes = [
             models.Index(fields=['publish_time']),
             models.Index(fields=['category']),
+            models.Index(fields=['is_published']),
         ]
         ordering = ['-publish_time']
 
     def __str__(self):
         return self.title
+
+
+class AdminOperationLog(models.Model):
+    """管理员操作日志表"""
+    OPERATION_TYPES = [
+        ('STOCK_UPDATE', '更新股票信息'),
+        ('NEWS_CREATE', '创建新闻'),
+        ('NEWS_UPDATE', '更新新闻'),
+        ('NEWS_DELETE', '删除新闻'),
+        ('USER_MANAGE', '用户管理'),
+        ('TRADE_MANAGE', '交易管理'),
+        ('DATA_SYNC', '数据同步'),
+    ]
+    
+    admin_user = models.ForeignKey(SysUser, on_delete=models.CASCADE, verbose_name='管理员')
+    operation_type = models.CharField(max_length=20, choices=OPERATION_TYPES, verbose_name='操作类型')
+    operation_desc = models.CharField(max_length=200, verbose_name='操作描述')
+    target_object = models.CharField(max_length=100, null=True, blank=True, verbose_name='操作对象')
+    ip_address = models.GenericIPAddressField(null=True, blank=True, verbose_name='IP地址')
+    user_agent = models.CharField(max_length=200, null=True, blank=True, verbose_name='用户代理')
+    operation_time = models.DateTimeField(auto_now_add=True, verbose_name='操作时间')
+    is_success = models.BooleanField(default=True, verbose_name='是否成功')
+    error_message = models.TextField(null=True, blank=True, verbose_name='错误信息')
+
+    class Meta:
+        db_table = 'admin_operation_log'
+        verbose_name = '管理员操作日志'
+        verbose_name_plural = verbose_name
+        indexes = [
+            models.Index(fields=['admin_user', 'operation_time']),
+            models.Index(fields=['operation_type', 'operation_time']),
+            models.Index(fields=['operation_time']),
+        ]
+        ordering = ['-operation_time']
+
+    def __str__(self):
+        return f"{self.admin_user.username} - {self.operation_type} - {self.operation_time}"
 
 
 # Serializers

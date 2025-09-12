@@ -172,17 +172,21 @@ class StockDataService:
     
     @staticmethod
     def get_top_stocks(limit=10):
-        """获取热门牛股 - 基于涨跌幅排序"""
+        """获取热门牛股 - 基于涨跌幅排序，返回每日涨幅最大的股票"""
         try:
             # 获取最新交易日的股票数据，按涨跌幅排序
             latest_date = StockDaily.objects.values('trade_date').order_by('-trade_date').first()
             if not latest_date:
-                return []
+                raise Exception('数据库中没有股票交易数据')
             
+            # 获取涨跌幅大于0且有效的股票，按涨跌幅排序
             top_stocks = StockDaily.objects.filter(
                 trade_date=latest_date['trade_date'],
-                pct_chg__isnull=False
-            ).select_related().order_by('-pct_chg')[:limit]
+                pct_chg__isnull=False,
+                pct_chg__gt=0,  # 只获取上涨的股票
+                close__isnull=False,
+                vol__gt=0  # 确保有成交量
+            ).order_by('-pct_chg')[:limit]
             
             result = []
             for stock_daily in top_stocks:
@@ -191,247 +195,133 @@ class StockDataService:
                     result.append({
                         'ts_code': stock_daily.ts_code,
                         'name': stock_basic.name,
-                        'close': stock_daily.close,
-                        'change': stock_daily.change,
-                        'pct_chg': stock_daily.pct_chg,
-                        'vol': stock_daily.vol,
-                        'amount': stock_daily.amount,
+                        'close': float(stock_daily.close) if stock_daily.close else 0,
+                        'change': float(stock_daily.change) if stock_daily.change else 0,
+                        'pct_chg': float(stock_daily.pct_chg) if stock_daily.pct_chg else 0,
+                        'vol': stock_daily.vol if stock_daily.vol else 0,
+                        'amount': float(stock_daily.amount) if stock_daily.amount else 0,
+                        'trade_date': stock_daily.trade_date.strftime('%Y-%m-%d'),
+                        'industry': stock_basic.industry if stock_basic.industry else '未分类'
                     })
                 except StockBasic.DoesNotExist:
                     continue
             
+            # 如果没有上涨的股票，则返回涨跌幅最大的股票（包括下跌）
+            if not result:
+                top_stocks = StockDaily.objects.filter(
+                    trade_date=latest_date['trade_date'],
+                    pct_chg__isnull=False,
+                    close__isnull=False,
+                    vol__gt=0
+                ).order_by('-pct_chg')[:limit]
+                
+                for stock_daily in top_stocks:
+                    try:
+                        stock_basic = StockBasic.objects.get(ts_code=stock_daily.ts_code)
+                        result.append({
+                            'ts_code': stock_daily.ts_code,
+                            'name': stock_basic.name,
+                            'close': float(stock_daily.close) if stock_daily.close else 0,
+                            'change': float(stock_daily.change) if stock_daily.change else 0,
+                            'pct_chg': float(stock_daily.pct_chg) if stock_daily.pct_chg else 0,
+                            'vol': stock_daily.vol if stock_daily.vol else 0,
+                            'amount': float(stock_daily.amount) if stock_daily.amount else 0,
+                            'trade_date': stock_daily.trade_date.strftime('%Y-%m-%d'),
+                            'industry': stock_basic.industry if stock_basic.industry else '未分类'
+                        })
+                    except StockBasic.DoesNotExist:
+                        continue
+            
+            if not result:
+                raise Exception(f'在{latest_date["trade_date"]}没有找到有效的股票交易数据')
+            
             return result
         
         except Exception as e:
-            return []
-
-
-class TradingService:
-    """交易服务"""
+            print(f"获取热门股票失败: {str(e)}")
+            raise  # 直接抛出异常，不返回空数组
     
     @staticmethod
-    def get_or_create_account(user):
-        """获取或创建用户股票账户"""
+    def get_hot_stocks(limit=10):
+        """获取热门股票 - get_top_stocks的别名"""
+        return StockDataService.get_top_stocks(limit)
+    
+    @staticmethod
+    def get_index_daily_from_tushare(ts_code, period='daily', limit=100):
+        """从Tushare API直接获取指数K线数据"""
         try:
-            account = UserStockAccount.objects.get(user=user)
-        except UserStockAccount.DoesNotExist:
-            # 根据用户角色设置初始资金
-            user_roles = SysUserRole.objects.filter(user=user)
-            initial_balance = Decimal('100000.00')  # 默认普通用户
+            if not pro:
+                print("Tushare pro API未初始化")
+                return []
             
-            for user_role in user_roles:
-                if user_role.role.code == 'admin':
-                    initial_balance = Decimal('500000.00')
-                    break
-                elif user_role.role.code == 'superadmin':
-                    initial_balance = Decimal('1000000.00')
-                    break
+            # 放宽限流策略，改为每分钟最多5次调用
+            if not RateLimiter.can_call("index_daily", max_calls=5, time_window=60):
+                print(f"指数数据API限流中，等待1分钟后重试")
+                return []
             
-            account = UserStockAccount.objects.create(
-                user=user,
-                account_balance=initial_balance,
-                total_assets=initial_balance
+            # 记录API调用
+            RateLimiter.record_call("index_daily")
+            
+            # 计算日期范围 - 确保获取足够的数据
+            end_date = datetime.now().strftime('%Y%m%d')
+            if period == 'daily':
+                # 增加日期范围，确保获取到足够的交易日数据
+                start_date = (datetime.now() - timedelta(days=limit * 3)).strftime('%Y%m%d')
+            elif period == 'weekly':
+                start_date = (datetime.now() - timedelta(days=limit * 14)).strftime('%Y%m%d')
+            elif period == 'monthly':
+                start_date = (datetime.now() - timedelta(days=limit * 60)).strftime('%Y%m%d')
+            else:
+                start_date = (datetime.now() - timedelta(days=300)).strftime('%Y%m%d')
+            
+            print(f"获取指数数据: {ts_code}, 日期范围: {start_date} - {end_date}")
+            
+            # 获取指数日线数据
+            import pandas as pd
+            df = pro.index_daily(
+                ts_code=ts_code,
+                start_date=start_date,
+                end_date=end_date,
+                fields='ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount'
             )
-        
-        return account
-    
-    @staticmethod
-    def buy_stock(user, ts_code, price, shares):
-        """买入股票"""
-        try:
-            with transaction.atomic():
-                # 检查股票是否存在
-                try:
-                    stock = StockBasic.objects.get(ts_code=ts_code)
-                except StockBasic.DoesNotExist:
-                    return {'success': False, 'message': '股票代码不存在'}
-                
-                # 获取用户账户
-                account = TradingService.get_or_create_account(user)
-                
-                # 计算交易金额和手续费
-                price = Decimal(str(price))
-                trade_amount = price * shares
-                commission = Decimal('5.00')  # 固定手续费
-                total_cost = trade_amount + commission
-                
-                # 检查账户余额
-                if account.account_balance < total_cost:
-                    return {'success': False, 'message': '账户余额不足'}
-                
-                # 检查用户状态
-                if user.status == 1:  # 停用状态
-                    return {'success': False, 'message': '账户已被冻结，无法交易'}
-                
-                # 扣减账户余额
-                account.account_balance -= total_cost
-                account.save()
-                
-                # 更新持仓
-                position, created = UserPosition.objects.get_or_create(
-                    user=user,
-                    ts_code=ts_code,
-                    defaults={
-                        'stock_name': stock.name,
-                        'position_shares': 0,
-                        'available_shares': 0,
-                        'cost_price': price,
-                        'current_price': price,
-                    }
-                )
-                
-                if created:
-                    position.position_shares = shares
-                    position.available_shares = shares
-                    position.cost_price = price
-                else:
-                    # 计算新的成本价（加权平均）
-                    total_cost_old = position.cost_price * position.position_shares
-                    total_cost_new = price * shares
-                    new_total_shares = position.position_shares + shares
-                    
-                    position.cost_price = (total_cost_old + total_cost_new) / new_total_shares
-                    position.position_shares = new_total_shares
-                    position.available_shares += shares
-                
-                position.current_price = price
-                position.save()
-                
-                # 记录交易
-                TradeRecord.objects.create(
-                    user=user,
-                    ts_code=ts_code,
-                    stock_name=stock.name,
-                    trade_type='BUY',
-                    trade_price=price,
-                    trade_shares=shares,
-                    trade_amount=trade_amount,
-                    commission=commission,
-                    status='COMPLETED',
-                    remark=f'买入{stock.name} {shares}股'
-                )
-                
-                return {
-                    'success': True,
-                    'message': f'成功买入{stock.name} {shares}股',
-                    'remaining_balance': account.account_balance
-                }
-        
-        except Exception as e:
-            return {'success': False, 'message': f'买入失败: {str(e)}'}
-    
-    @staticmethod
-    def sell_stock(user, ts_code, price, shares):
-        """卖出股票"""
-        try:
-            with transaction.atomic():
-                # 检查持仓
-                try:
-                    position = UserPosition.objects.get(user=user, ts_code=ts_code)
-                except UserPosition.DoesNotExist:
-                    return {'success': False, 'message': '未持有该股票'}
-                
-                # 检查可卖数量
-                if position.available_shares < shares:
-                    return {'success': False, 'message': f'可卖数量不足，当前可卖: {position.available_shares}股'}
-                
-                # 获取股票信息
-                stock = StockBasic.objects.get(ts_code=ts_code)
-                
-                # 获取用户账户
-                account = TradingService.get_or_create_account(user)
-                
-                # 计算交易金额和手续费
-                price = Decimal(str(price))
-                trade_amount = price * shares
-                commission = Decimal('5.00')
-                net_amount = trade_amount - commission
-                
-                # 增加账户余额
-                account.account_balance += net_amount
-                account.save()
-                
-                # 更新持仓
-                position.position_shares -= shares
-                position.available_shares -= shares
-                position.current_price = price
-                
-                # 如果持仓为0，删除持仓记录
-                if position.position_shares <= 0:
-                    position.delete()
-                else:
-                    position.save()
-                
-                # 记录交易
-                TradeRecord.objects.create(
-                    user=user,
-                    ts_code=ts_code,
-                    stock_name=stock.name,
-                    trade_type='SELL',
-                    trade_price=price,
-                    trade_shares=shares,
-                    trade_amount=trade_amount,
-                    commission=commission,
-                    status='COMPLETED',
-                    remark=f'卖出{stock.name} {shares}股'
-                )
-                
-                return {
-                    'success': True,
-                    'message': f'成功卖出{stock.name} {shares}股',
-                    'net_amount': net_amount,
-                    'remaining_balance': account.account_balance
-                }
-        
-        except Exception as e:
-            return {'success': False, 'message': f'卖出失败: {str(e)}'}
-    
-    @staticmethod
-    def get_user_positions(user):
-        """获取用户持仓"""
-        positions = UserPosition.objects.filter(user=user).order_by('-update_time')
-        result = []
-        
-        for position in positions:
-            # 计算盈亏
-            profit_loss = (position.current_price - position.cost_price) * position.position_shares
-            profit_loss_ratio = ((position.current_price - position.cost_price) / position.cost_price * 100) if position.cost_price > 0 else 0
             
-            result.append({
-                'ts_code': position.ts_code,
-                'stock_name': position.stock_name,
-                'position_shares': position.position_shares,
-                'available_shares': position.available_shares,
-                'cost_price': float(position.cost_price),
-                'current_price': float(position.current_price),
-                'profit_loss': float(profit_loss),
-                'profit_loss_ratio': float(profit_loss_ratio),
-                'market_value': float(position.current_price * position.position_shares),
-            })
-        
-        return result
-    
-    @staticmethod
-    def get_user_trades(user, limit=20):
-        """获取用户交易记录"""
-        trades = TradeRecord.objects.filter(user=user).order_by('-trade_time')[:limit]
-        return [
-            {
-                'id': trade.id,
-                'ts_code': trade.ts_code,
-                'stock_name': trade.stock_name,
-                'trade_type': trade.trade_type,
-                'trade_type_display': trade.get_trade_type_display(),
-                'trade_price': trade.trade_price,
-                'trade_shares': trade.trade_shares,
-                'trade_amount': trade.trade_amount,
-                'commission': trade.commission,
-                'trade_time': trade.trade_time,
-                'status': trade.status,
-                'remark': trade.remark,
-            }
-            for trade in trades
-        ]
+            if df.empty:
+                print(f"指数 {ts_code} 在日期范围 {start_date}-{end_date} 内无数据")
+                return []
+            
+            print(f"成功获取指数数据 {len(df)} 条")
+            
+            # 转换为所需格式
+            kline_data = []
+            for _, row in df.iterrows():
+                try:
+                    kline_data.append({
+                        'date': pd.to_datetime(row['trade_date']).strftime('%Y-%m-%d'),
+                        'open': float(row['open']) if pd.notna(row['open']) else 0,
+                        'high': float(row['high']) if pd.notna(row['high']) else 0,
+                        'low': float(row['low']) if pd.notna(row['low']) else 0,
+                        'close': float(row['close']) if pd.notna(row['close']) else 0,
+                        'volume': int(row['vol']) if pd.notna(row['vol']) else 0,
+                        'amount': float(row['amount']) if pd.notna(row['amount']) else 0,
+                        'change': float(row['change']) if pd.notna(row['change']) else 0,
+                        'pct_chg': float(row['pct_chg']) if pd.notna(row['pct_chg']) else 0,
+                        'pre_close': float(row['pre_close']) if pd.notna(row['pre_close']) else 0
+                    })
+                except (ValueError, TypeError) as e:
+                    print(f"数据转换错误: {e}")
+                    continue
+            
+            # 按日期正序排列
+            kline_data.sort(key=lambda x: x['date'])
+            
+            # 限制返回数量
+            result = kline_data[-limit:] if limit and len(kline_data) > limit else kline_data
+            print(f"返回指数数据 {len(result)} 条")
+            return result
+            
+        except Exception as e:
+            print(f"获取指数数据失败: {e}")
+            return []
 
 
 class UserPermissionService:
@@ -457,7 +347,7 @@ class UserPermissionService:
     @staticmethod
     def is_admin(user):
         """检查是否为管理员"""
-        return UserPermissionService.has_permission(user, ['admin', 'superadmin'])
+        return user.is_admin or UserPermissionService.has_permission(user, ['admin', 'superadmin'])
     
     @staticmethod
     def is_superadmin(user):
@@ -469,7 +359,14 @@ class UserPermissionService:
         """获取所有管理员用户"""
         admin_roles = SysRole.objects.filter(code__in=['admin', 'superadmin'])
         admin_user_roles = SysUserRole.objects.filter(role__in=admin_roles)
-        return [ur.user for ur in admin_user_roles]
+        admin_users_from_roles = [ur.user for ur in admin_user_roles]
+        
+        # 同时包括直接标记为管理员的用户
+        admin_users_direct = list(SysUser.objects.filter(is_admin=True))
+        
+        # 合并去重
+        all_admin_users = list(set(admin_users_from_roles + admin_users_direct))
+        return all_admin_users
 
 
 class NewsService:
@@ -478,7 +375,7 @@ class NewsService:
     @staticmethod
     def get_latest_news(limit=10):
         """获取最新市场新闻"""
-        return MarketNews.objects.order_by('-publish_time')[:limit]
+        return MarketNews.objects.filter(is_published=True).order_by('-publish_time')[:limit]
     
     @staticmethod
     def create_news(title, content, source=None, category=None, related_stocks=None):
@@ -489,7 +386,8 @@ class NewsService:
             source=source or '系统',
             publish_time=datetime.now(),
             category=category,
-            related_stocks=related_stocks
+            related_stocks=related_stocks,
+            is_published=True
         )
 
 
@@ -575,6 +473,200 @@ class RateLimiter:
         oldest_call = min(cls._call_records[api_name])
         current_time = datetime.now().timestamp()
         return max(0, time_window - (current_time - oldest_call))
+
+
+class IntradayDataService:
+    """分时数据服务 - 参考sample项目方式，支持多数据源策略"""
+    
+    @staticmethod
+    def get_stock_intraday_from_tushare(ts_code):
+        """从Tushare获取分时数据 - 参考sample项目使用get_today_ticks"""
+        try:
+            import tushare as ts
+            
+            # 检查是否为工作日
+            from datetime import date, datetime
+            from chinese_calendar import is_workday, is_holiday
+            
+            today = date.today()
+            if not is_workday(today) or is_holiday(today):
+                return {'success': False, 'message': '非交易日', 'data': None}
+            
+            # 转换股票代码格式：000007.SZ -> 000007
+            stock_code = ts_code.split('.')[0]
+            
+            # 使用sample项目的方式获取今日分时数据
+            df = ts.get_today_ticks(stock_code)
+            
+            if df is not None and not df.empty:
+                # 转换为标准格式
+                times = []
+                prices = []
+                
+                for _, row in df.iterrows():
+                    time_str = str(row['time'])  # 091505格式
+                    price = float(row['price'])
+                    
+                    # 转换时间格式：091505 -> 09:15
+                    if len(time_str) == 6:
+                        formatted_time = f"{time_str[:2]}:{time_str[2:4]}"
+                        times.append(formatted_time)
+                        prices.append(price)
+                
+                return {
+                    'success': True,
+                    'data': {'time': times, 'price': prices},
+                    'source': 'tushare',
+                    'count': len(times)
+                }
+            else:
+                return {'success': False, 'message': 'Tushare无分时数据', 'data': None}
+                
+        except Exception as e:
+            return {'success': False, 'message': f'Tushare分时数据获取失败: {str(e)}', 'data': None}
+    
+    @staticmethod
+    def get_stock_intraday_from_eastmoney(ts_code):
+        """从东方财富API获取分时数据"""
+        try:
+            import requests
+            
+            # 转换股票代码格式
+            if ts_code.endswith('.SZ'):
+                secid = f"0.{ts_code.split('.')[0]}"
+            elif ts_code.endswith('.SH'):
+                secid = f"1.{ts_code.split('.')[0]}"
+            else:
+                return {'success': False, 'message': '不支持的股票代码格式', 'data': None}
+            
+            # 东方财富分时数据接口
+            url = "http://push2his.eastmoney.com/api/qt/stock/trends2/get"
+            params = {
+                'secid': secid,
+                'fields1': 'f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13',
+                'fields2': 'f51,f52,f53,f54,f55,f56,f57,f58',
+                'iscr': '0'
+            }
+            
+            response = requests.get(url, params=params, timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if 'data' in data and data['data'] and 'trends' in data['data']:
+                    trends = data['data']['trends']
+                    if trends:
+                        times = []
+                        prices = []
+                        
+                        for trend in trends:
+                            parts = trend.split(',')
+                            if len(parts) >= 2:
+                                time_str = parts[0]  # 2025-09-12 09:30 格式
+                                price = float(parts[1])
+                                
+                                # 提取时间部分：2025-09-12 09:30 -> 09:30
+                                if ' ' in time_str:
+                                    time_only = time_str.split(' ')[1]
+                                    times.append(time_only)
+                                    prices.append(price)
+                        
+                        return {
+                            'success': True,
+                            'data': {'time': times, 'price': prices},
+                            'source': 'eastmoney',
+                            'count': len(times)
+                        }
+            
+            return {'success': False, 'message': '东方财富无分时数据', 'data': None}
+            
+        except Exception as e:
+            return {'success': False, 'message': f'东方财富分时数据获取失败: {str(e)}', 'data': None}
+    
+    @staticmethod
+    def get_stock_intraday_from_tencent(ts_code):
+        """从腾讯财经API获取分时数据"""
+        try:
+            import requests
+            
+            # 转换股票代码格式
+            if ts_code.endswith('.SZ'):
+                stock_code = f"sz{ts_code.split('.')[0]}"
+            elif ts_code.endswith('.SH'):
+                stock_code = f"sh{ts_code.split('.')[0]}"
+            else:
+                return {'success': False, 'message': '不支持的股票代码格式', 'data': None}
+            
+            # 腾讯分时数据接口
+            market = stock_code[:2]  # sz or sh
+            code = stock_code[2:]    # 6位数字
+            
+            url = f"http://data.gtimg.cn/flashdata/hushen/minute/{market}{code}.js"
+            response = requests.get(url, timeout=10)
+            
+            if response.status_code == 200 and response.text:
+                lines = response.text.strip().split('\n')
+                valid_lines = [line for line in lines if ' ' in line and ':' in line]
+                
+                if valid_lines:
+                    times = []
+                    prices = []
+                    
+                    for line in valid_lines:
+                        parts = line.split(' ')
+                        if len(parts) >= 2:
+                            time_str = parts[0]  # 09:30 格式
+                            price = float(parts[1])
+                            times.append(time_str)
+                            prices.append(price)
+                    
+                    return {
+                        'success': True,
+                        'data': {'time': times, 'price': prices},
+                        'source': 'tencent',
+                        'count': len(times)
+                    }
+            
+            return {'success': False, 'message': '腾讯无分时数据', 'data': None}
+            
+        except Exception as e:
+            return {'success': False, 'message': f'腾讯分时数据获取失败: {str(e)}', 'data': None}
+    
+    
+    @staticmethod
+    def get_stock_intraday_multi_source(ts_code):
+        """多数据源策略获取分时数据"""
+        # 优先级: 东方财富 > 腾讯 > Tushare
+        data_sources = [
+            ('eastmoney', IntradayDataService.get_stock_intraday_from_eastmoney),
+            ('tencent', IntradayDataService.get_stock_intraday_from_tencent),
+            ('tushare', IntradayDataService.get_stock_intraday_from_tushare)
+        ]
+        
+        for source_name, source_func in data_sources:
+            try:
+                # 检查缓存
+                cache_key = f"intraday_{ts_code}_{source_name}"
+                cached_data = DataCache.get(cache_key, expiry_seconds=30)  # 30秒缓存
+                if cached_data:
+                    return cached_data
+                
+                # 获取数据
+                result = source_func(ts_code)
+                
+                if result['success']:
+                    # 缓存成功结果
+                    DataCache.set(cache_key, result)
+                    return result
+                    
+            except Exception as e:
+                print(f"数据源 {source_name} 获取失败: {e}")
+                continue
+        
+        return {
+            'success': False,
+            'message': '所有数据源都无法获取分时数据，请稍后重试',
+            'data': None
+        }
 
 
 class RealTimeDataService:
@@ -800,193 +892,3 @@ class RealTimeDataService:
             '000905.SH': '中证500'
         }
         return index_names.get(ts_code, ts_code)
-    
-    @staticmethod
-    def get_intraday_chart_data(ts_code):
-        """获取分时图数据 - 使用智能缓存和限流策略"""
-        try:
-            # 1. 检查缓存
-            cache_key = f"intraday_chart_{ts_code}"
-            cached_data = DataCache.get(cache_key, expiry_seconds=30)  # 30秒缓存
-            if cached_data:
-                cached_data['data']['message'] = f'使用缓存数据 (30秒内有效)'
-                cached_data['data']['data_source'] = 'cache'
-                return cached_data
-            
-            # 2. 检查限流
-            api_name = "stk_mins"
-            if not RateLimiter.can_call(api_name, max_calls=2, time_window=60):
-                wait_time = RateLimiter.get_wait_time(api_name, max_calls=2, time_window=60)
-                
-                # 超出限流，返回数据库中的最新数据
-                latest_daily = StockDaily.objects.filter(ts_code=ts_code).order_by('-trade_date').first()
-                if not latest_daily:
-                    return {
-                        'success': False,
-                        'message': f'API限流中，需等待{int(wait_time)}秒，且未找到股票数据'
-                    }
-                
-                return {
-                    'success': True,
-                    'data': {
-                        'ts_code': ts_code,
-                        'intraday_data': [],  # 限流期间不提供分时数据
-                        'base_info': {
-                            'current_price': float(latest_daily.close) if latest_daily.close else 0,
-                            'pre_close': float(latest_daily.pre_close) if latest_daily.pre_close else 0,
-                            'high': float(latest_daily.high) if latest_daily.high else 0,
-                            'low': float(latest_daily.low) if latest_daily.low else 0,
-                            'change': float(latest_daily.change) if latest_daily.change else 0,
-                            'pct_chg': float(latest_daily.pct_chg) if latest_daily.pct_chg else 0,
-                            'volume': latest_daily.vol if latest_daily.vol else 0,
-                            'amount': float(latest_daily.amount) if latest_daily.amount else 0,
-                            'trade_date': latest_daily.trade_date.strftime('%Y-%m-%d')
-                        },
-                        'timestamp': datetime.now().isoformat(),
-                        'data_source': 'database_daily_rate_limited',
-                        'message': f'API限流中，需等待{int(wait_time)}秒。显示最新日线数据'
-                    }
-                }
-            
-            # 3. 获取基础数据
-            latest_daily = StockDaily.objects.filter(ts_code=ts_code).order_by('-trade_date').first()
-            if not latest_daily:
-                return {
-                    'success': False,
-                    'message': '未找到股票数据'
-                }
-            
-            # 4. 尝试获取真实的分时数据
-            intraday_data = []
-            data_source = 'database_daily'
-            message = '当前非交易时间或无分时数据权限，显示最新日线数据'
-            
-            try:
-                if pro and RealTimeDataService.is_trading_time():
-                    # 记录API调用
-                    RateLimiter.record_call(api_name)
-                    
-                    # 使用Tushare获取分时数据
-                    today = datetime.now().strftime('%Y%m%d')
-                    df = pro.stk_mins(ts_code=ts_code, freq='1min', trade_date=today)
-                    
-                    if not df.empty:
-                        for _, row in df.iterrows():
-                            intraday_data.append({
-                                'time': datetime.strptime(str(row['trade_time']), '%Y%m%d %H%M%S').strftime('%H:%M'),
-                                'price': float(row['close']) if row['close'] else 0,
-                                'volume': int(row['vol']) if row['vol'] else 0,
-                                'amount': float(row['amount']) if row['amount'] else 0,
-                                'change': float(row['close'] - latest_daily.pre_close) if row['close'] and latest_daily.pre_close else 0,
-                                'pct_change': float((row['close'] - latest_daily.pre_close) / latest_daily.pre_close * 100) if row['close'] and latest_daily.pre_close else 0
-                            })
-                        
-                        data_source = 'tushare_realtime'
-                        message = f'获取到{len(intraday_data)}个分时数据点'
-                
-            except Exception as e:
-                print(f"获取Tushare分时数据失败: {e}")
-                # 如果API调用失败，返回空分时数据但保留基础信息
-                data_source = 'database_daily_api_failed'
-                message = f'Tushare API调用失败: {str(e)}，显示最新日线数据'
-            
-            # 5. 构建返回数据
-            result = {
-                'success': True,
-                'data': {
-                    'ts_code': ts_code,
-                    'intraday_data': intraday_data,
-                    'base_info': {
-                        'current_price': float(latest_daily.close) if latest_daily.close else 0,
-                        'pre_close': float(latest_daily.pre_close) if latest_daily.pre_close else 0,
-                        'high': float(latest_daily.high) if latest_daily.high else 0,
-                        'low': float(latest_daily.low) if latest_daily.low else 0,
-                        'change': float(latest_daily.change) if latest_daily.change else 0,
-                        'pct_chg': float(latest_daily.pct_chg) if latest_daily.pct_chg else 0,
-                        'volume': latest_daily.vol if latest_daily.vol else 0,
-                        'amount': float(latest_daily.amount) if latest_daily.amount else 0,
-                        'trade_date': latest_daily.trade_date.strftime('%Y-%m-%d')
-                    },
-                    'timestamp': datetime.now().isoformat(),
-                    'data_source': data_source,
-                    'message': message
-                }
-            }
-            
-            # 6. 缓存结果
-            DataCache.set(cache_key, result)
-            
-            return result
-            
-        except Exception as e:
-            return {
-                'success': False,
-                'message': f'获取分时图数据失败: {str(e)}'
-            }
-    
-    @staticmethod
-    def get_realtime_tick_data(ts_code):
-        """获取实时逐笔数据 - 使用Tushare真实数据"""
-        try:
-            # 获取最新股票数据作为基础信息
-            latest_daily = StockDaily.objects.filter(ts_code=ts_code).order_by('-trade_date').first()
-            if not latest_daily:
-                return {
-                    'success': False,
-                    'message': '未找到股票数据'
-                }
-            
-            # 尝试获取真实逐笔数据
-            tick_data = []
-            try:
-                if pro and RealTimeDataService.is_trading_time():
-                    # 使用Tushare获取逐笔数据（需要高级权限）
-                    today = datetime.now().strftime('%Y%m%d')
-                    
-                    # 注意：逐笔数据接口需要很高的权限等级，大部分用户无法访问
-                    # 这里尝试调用，如果失败则回退到基础信息
-                    df = pro.stk_ticks(ts_code=ts_code, trade_date=today)
-                    
-                    if not df.empty:
-                        # 取最新的20条逐笔数据
-                        recent_ticks = df.head(20)
-                        for _, row in recent_ticks.iterrows():
-                            tick_data.append({
-                                'time': datetime.strptime(str(row['trade_time']), '%Y%m%d %H%M%S').strftime('%H:%M:%S'),
-                                'price': float(row['price']) if row['price'] else 0,
-                                'volume': int(row['vol']) if row['vol'] else 0,
-                                'amount': float(row['amount']) if row['amount'] else 0,
-                                'bs_flag': row['bs_flag'] if 'bs_flag' in row else 'N',  # 买卖标识
-                                'change': float(row['change']) if 'change' in row and row['change'] else 0
-                            })
-                
-            except Exception as e:
-                print(f"获取Tushare逐笔数据失败: {e}")
-                # 逐笔数据获取失败是正常的，因为需要很高权限
-            
-            base_price = float(latest_daily.close) if latest_daily.close else 0
-            
-            return {
-                'success': True,
-                'data': {
-                    'ts_code': ts_code,
-                    'tick_data': tick_data,  # 如果获取失败则为空列表
-                    'base_info': {
-                        'current_price': base_price,
-                        'latest_trade_date': latest_daily.trade_date.strftime('%Y-%m-%d'),
-                        'volume': latest_daily.vol if latest_daily.vol else 0,
-                        'amount': float(latest_daily.amount) if latest_daily.amount else 0,
-                        'change': float(latest_daily.change) if latest_daily.change else 0,
-                        'pct_chg': float(latest_daily.pct_chg) if latest_daily.pct_chg else 0
-                    },
-                    'timestamp': datetime.now().isoformat(),
-                    'data_source': 'tushare_ticks' if tick_data else 'database_daily',
-                    'message': f'逐笔数据条数: {len(tick_data)}' if tick_data else '当前非交易时间或无逐笔数据权限，显示基础股票信息'
-                }
-            }
-            
-        except Exception as e:
-            return {
-                'success': False,
-                'message': f'获取逐笔数据失败: {str(e)}'
-            }

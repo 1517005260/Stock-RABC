@@ -285,7 +285,27 @@ export default {
     miniChartOption() {
       if (!this.chartData.length) return {}
       
-      const times = this.chartData.map(item => item.time)
+      // 格式化时间显示：将091505格式转换为09:15格式
+      const formatTimeDisplay = (timeStr) => {
+        if (!timeStr) return timeStr
+        
+        // 如果是091505这种6位格式，转换为09:15
+        if (typeof timeStr === 'string' && timeStr.length === 6 && /^\d{6}$/.test(timeStr)) {
+          const hours = timeStr.substring(0, 2)
+          const minutes = timeStr.substring(2, 4)
+          return `${hours}:${minutes}`
+        }
+        
+        // 如果是09:15这种格式，直接返回
+        if (typeof timeStr === 'string' && timeStr.includes(':')) {
+          return timeStr
+        }
+        
+        // 其他格式尝试转换
+        return timeStr
+      }
+      
+      const times = this.chartData.map(item => formatTimeDisplay(item.time))
       const prices = this.chartData.map(item => item.price)
       
       return {
@@ -313,6 +333,7 @@ export default {
         },
         series: [
           {
+            name: '价格走势',
             type: 'line',
             data: prices,
             smooth: true,

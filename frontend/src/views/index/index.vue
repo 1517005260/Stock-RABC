@@ -59,7 +59,7 @@
         </el-col>
         <el-col :span="8">
           <div class="feature-item">
-            <el-icon size="32" color="#67C23A"><Shield /></el-icon>
+            <el-icon size="32" color="#67C23A"><Lock /></el-icon>
             <h4>权限管理</h4>
             <p>基于RBAC模型的完整权限管理体系</p>
           </div>
@@ -102,7 +102,7 @@ import {
   User,
   Setting,
   DataAnalysis,
-  Shield,
+  Lock,
   Monitor,
   Search,
   ChatDotSquare
@@ -116,7 +116,7 @@ export default {
     User,
     Setting,
     DataAnalysis,
-    Shield,
+    Lock,
     Monitor,
     Search,
     ChatDotSquare
