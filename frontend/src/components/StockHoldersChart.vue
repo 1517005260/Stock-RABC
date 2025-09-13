@@ -12,6 +12,7 @@
 <script>
 import * as echarts from 'echarts'
 import { getStockHolders } from '@/api/stock'
+import { markRaw } from 'vue'
 
 export default {
   name: 'StockHoldersChart',
@@ -52,7 +53,8 @@ export default {
   methods: {
     initChart() {
       if (this.$refs.chartContainer) {
-        this.chart = echarts.init(this.$refs.chartContainer)
+        // 使用 markRaw 防止 Vue 反应式系统干扰 ECharts 实例
+        this.chart = markRaw(echarts.init(this.$refs.chartContainer))
         window.addEventListener('resize', this.handleResize)
       }
     },

@@ -233,6 +233,7 @@ import {
   DataZoomComponent,
   ToolboxComponent
 } from "echarts/components"
+import { markRaw } from 'vue'
 
 use([
   CanvasRenderer,
@@ -282,143 +283,67 @@ export default {
     },
     
     realtimeChartOption() {
-      // 参考sample项目的处理方式，优雅降级
-      if (!this.realtimeData || !Array.isArray(this.realtimeData) || !this.realtimeData.length) {
-        // 无分时数据时，显示提示信息，但保持图表容器有效
-        return {
-          title: {
-            text: '暂无分时数据',
-            left: 'center',
-            top: 'middle',
-            textStyle: {
-              color: '#999',
-              fontSize: 16
-            }
-          },
-          // 保持基础的坐标轴结构，避免ECharts内部错误
-          xAxis: {
-            type: 'category',
+      // 通用的图表基础结构
+      const createBaseOption = (title, titleColor = '#999') => markRaw({
+        title: {
+          text: title,
+          left: 'center',
+          top: 'middle',
+          textStyle: {
+            color: titleColor,
+            fontSize: 14
+          }
+        },
+        xAxis: {
+          type: 'category',
+          data: [],
+          show: false
+        },
+        yAxis: {
+          type: 'value',
+          show: false
+        },
+        series: [
+          {
+            name: '股价',
+            type: 'line',
             data: [],
-            show: false
-          },
-          yAxis: {
-            type: 'value',
-            show: false
-          },
-          series: [
-            {
-              name: '暂无数据',
-              type: 'line',
-              data: [],
-              showSymbol: false
-            }
-          ]
-        }
+            showSymbol: false
+          }
+        ]
+      })
+
+      // 数据验证
+      if (!this.realtimeData || !Array.isArray(this.realtimeData) || !this.realtimeData.length) {
+        return createBaseOption('暂无分时数据')
       }
-      
-      // 验证和过滤数据
-      const validData = this.realtimeData.filter(item => 
-        item && 
-        typeof item === 'object' && 
-        item.time && 
-        item.price != null && 
+
+      // 过滤和验证数据
+      const validPairs = this.realtimeData.filter(item =>
+        item &&
+        typeof item === 'object' &&
+        item.time &&
+        item.price != null &&
         !isNaN(parseFloat(item.price))
       )
-      
-      if (validData.length === 0) {
-        // 数据格式异常时的降级处理
-        return {
-          title: {
-            text: '数据格式异常，请稍后重试',
-            left: 'center',
-            top: 'middle',
-            textStyle: {
-              color: '#ff6b6b',
-              fontSize: 14
-            }
-          },
-          xAxis: {
-            type: 'category',
-            data: [],
-            show: false
-          },
-          yAxis: {
-            type: 'value', 
-            show: false
-          },
-          series: [
-            {
-              name: '数据异常',
-              type: 'line',
-              data: [],
-              showSymbol: false
-            }
-          ]
-        }
+
+      if (validPairs.length === 0) {
+        return createBaseOption('数据格式异常，请稍后重试', '#ff6b6b')
       }
-      
+
       // 格式化时间显示：将091505格式转换为09:15格式
-      const formatTimeDisplay = (timeStr) => {
+      const formatTime = (timeStr) => {
         if (!timeStr) return timeStr
-        
-        // 如果是091505这种6位格式，转换为09:15
         if (typeof timeStr === 'string' && timeStr.length === 6 && /^\d{6}$/.test(timeStr)) {
-          const hours = timeStr.substring(0, 2)
-          const minutes = timeStr.substring(2, 4)
-          return `${hours}:${minutes}`
+          return `${timeStr.substring(0, 2)}:${timeStr.substring(2, 4)}`
         }
-        
-        // 如果是09:15这种格式，直接返回
-        if (typeof timeStr === 'string' && timeStr.includes(':')) {
-          return timeStr
-        }
-        
-        // 其他格式尝试转换
         return timeStr
       }
-      
-      // 同时验证时间和价格，确保配对
-      const validPairs = validData.filter(item => {
-        const price = parseFloat(item.price)
-        return !isNaN(price) && price != null && formatTimeDisplay(item.time)
-      })
-      
-      if (validPairs.length === 0) {
-        // 所有数据都无效时的降级处理
-        return {
-          title: {
-            text: '分时数据无有效数值',
-            left: 'center',
-            top: 'middle', 
-            textStyle: {
-              color: '#ff6b6b',
-              fontSize: 14
-            }
-          },
-          xAxis: {
-            type: 'category',
-            data: [],
-            show: false
-          },
-          yAxis: {
-            type: 'value',
-            show: false
-          },
-          series: [
-            {
-              name: '无效数据',
-              type: 'line',
-              data: [],
-              showSymbol: false
-            }
-          ]
-        }
-      }
-      
-      const times = validPairs.map(item => formatTimeDisplay(item.time))
+
+      const times = validPairs.map(item => formatTime(item.time))
       const prices = validPairs.map(item => parseFloat(item.price))
-      
-      return {
+
+      return markRaw({
         title: {
           text: '实时股价',
           left: 'center'
@@ -456,7 +381,7 @@ export default {
           {
             start: 0,
             end: 100,
-            handleIcon: 'M10.7,11.9v-1.3H9.3v1.3c-4.9,0.3-8.8,4.4-8.8,9.4c0,5,3.9,9.1,8.8,9.4v1.3h1.3v-1.3c4.9-0.3,8.8-4.4,8.8-9.4C19.5,16.3,15.6,12.2,10.7,11.9z M13.3,24.4H6.7V23h6.6V24.4z M13.3,19.6H6.7v-1.4h6.6V19.6z',
+            handleIcon: 'M10.7,11.9v-1.3H9.3v1.3c-4.9,0.3-8.8,4.4-8.8,9.4c0,5,3.9,9.1,8.8,9.4v1.3h1.3v-1.3c4.9-0.3,8.8-4.4-8.8-9.4C19.5,16.3,15.6,12.2,10.7,11.9z M13.3,24.4H6.7V23h6.6V24.4z M13.3,19.6H6.7v-1.4h6.6V19.6z',
             handleSize: '80%',
             handleStyle: {
               color: '#fff',
@@ -493,7 +418,7 @@ export default {
             data: prices
           }
         ]
-      }
+      })
     }
   },
   async created() {
