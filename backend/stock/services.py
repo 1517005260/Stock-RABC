@@ -5,7 +5,9 @@ import tushare as ts
 from datetime import datetime, timedelta
 from decimal import Decimal
 from django.db import transaction
+from django.db import models
 from django.core.exceptions import ObjectDoesNotExist
+from django.utils import timezone
 from dotenv import load_dotenv
 
 from stock.models import StockBasic, StockDaily, StockCompany, TradeCal, IndexDaily
@@ -172,7 +174,123 @@ class StockDataService:
     
     @staticmethod
     def get_top_stocks(limit=10):
-        """获取热门牛股 - 基于涨跌幅排序，返回每日涨幅最大的股票"""
+        """获取热门牛股 - 直接从TuShare API获取今日涨幅榜"""
+        try:
+            if not pro:
+                raise Exception('TuShare API未配置，无法获取涨幅榜')
+
+            # 获取今日交易数据
+            today = datetime.now().strftime('%Y%m%d')
+
+            try:
+                # 获取今日全市场股票数据
+                df = pro.daily(
+                    trade_date=today,
+                    fields='ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount'
+                )
+
+                # 如果今日没有数据，尝试获取最近交易日数据
+                if df.empty:
+                    for i in range(1, 6):
+                        date_str = (datetime.now() - timedelta(days=i)).strftime('%Y%m%d')
+                        df = pro.daily(
+                            trade_date=date_str,
+                            fields='ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount'
+                        )
+                        if not df.empty:
+                            break
+
+                if df.empty:
+                    raise Exception("无法获取股票交易数据")
+
+                # 筛选出涨幅榜：排除ST股票、停牌股票，筛选涨幅最大的股票
+                filtered_df = df[
+                    (df['pct_chg'].notna()) &
+                    (df['pct_chg'] > 0) &  # 只要上涨的股票
+                    (df['vol'] > 0) &  # 有成交量
+                    (df['close'] > 0) &  # 正常价格
+                    (~df['ts_code'].str.contains('ST', na=False)) &  # 排除ST股票
+                    (~df['ts_code'].str.contains('退', na=False))  # 排除退市股票
+                ].sort_values('pct_chg', ascending=False).head(limit * 2)  # 获取更多数据以便筛选
+
+                # 如果没有上涨股票，获取涨跌幅最大的股票
+                if filtered_df.empty:
+                    filtered_df = df[
+                        (df['pct_chg'].notna()) &
+                        (df['vol'] > 0) &
+                        (df['close'] > 0) &
+                        (~df['ts_code'].str.contains('ST', na=False))
+                    ].sort_values('pct_chg', ascending=False).head(limit * 2)
+
+                if filtered_df.empty:
+                    raise Exception("没有找到有效的股票数据")
+
+                # 获取股票基本信息（名称、行业等）
+                ts_codes = filtered_df['ts_code'].tolist()
+
+                # 分批获取股票基本信息（TuShare单次查询限制）
+                stock_basic_data = {}
+                batch_size = 100
+                for i in range(0, len(ts_codes), batch_size):
+                    batch_codes = ts_codes[i:i+batch_size]
+                    try:
+                        basic_df = pro.stock_basic(
+                            ts_code=','.join(batch_codes),
+                            fields='ts_code,name,industry'
+                        )
+                        for _, row in basic_df.iterrows():
+                            stock_basic_data[row['ts_code']] = {
+                                'name': row['name'],
+                                'industry': row['industry'] if row['industry'] else '未分类'
+                            }
+                    except Exception as e:
+                        print(f"获取基本信息批次失败: {e}")
+
+                # 构建热门股票列表
+                result = []
+                for _, row in filtered_df.iterrows():
+                    ts_code = row['ts_code']
+                    basic_info = stock_basic_data.get(ts_code, {'name': ts_code, 'industry': '未分类'})
+
+                    result.append({
+                        'ts_code': ts_code,
+                        'name': basic_info['name'],
+                        'close': float(row['close']) if row['close'] else 0,
+                        'open': float(row['open']) if row['open'] else 0,
+                        'high': float(row['high']) if row['high'] else 0,
+                        'low': float(row['low']) if row['low'] else 0,
+                        'change': float(row['change']) if row['change'] else 0,
+                        'pct_chg': float(row['pct_chg']) if row['pct_chg'] else 0,
+                        'vol': int(row['vol']) if row['vol'] else 0,
+                        'amount': float(row['amount']) if row['amount'] else 0,
+                        'trade_date': datetime.strptime(str(row['trade_date']), '%Y%m%d').strftime('%Y-%m-%d'),
+                        'industry': basic_info['industry'],
+                        'data_source': 'tushare_api_realtime'
+                    })
+
+                    # 限制返回数量
+                    if len(result) >= limit:
+                        break
+
+                if not result:
+                    raise Exception("处理股票数据后无有效结果")
+
+                print(f"成功从TuShare API获取 {len(result)} 只涨幅榜股票")
+                return result
+
+            except Exception as api_error:
+                print(f"TuShare API调用失败: {api_error}")
+                # 回退到本地数据库
+                return StockDataService.get_top_stocks_from_db(limit)
+
+        except Exception as e:
+            print(f"获取热门股票失败: {str(e)}")
+            # 最终回退：返回固定的热门股票
+            return StockDataService.get_fallback_stocks(limit)
+
+    @staticmethod
+    def get_top_stocks_from_db(limit=10):
+        """从本地数据库获取热门股票（回退方案）"""
         try:
             # 获取最新交易日的股票数据，按涨跌幅排序
             latest_date = StockDaily.objects.values('trade_date').order_by('-trade_date').first()
@@ -236,10 +354,43 @@ class StockDataService:
                 raise Exception(f'在{latest_date["trade_date"]}没有找到有效的股票交易数据')
             
             return result
-        
+
         except Exception as e:
-            print(f"获取热门股票失败: {str(e)}")
-            raise  # 直接抛出异常，不返回空数组
+            print(f"从本地数据库获取热门股票失败: {str(e)}")
+            return []
+
+    @staticmethod
+    def get_fallback_stocks(limit=10):
+        """固定的热门股票列表（最终回退方案）"""
+        fallback_stocks = [
+            '000001.SZ', '000002.SZ', '000858.SZ', '600000.SH', '600036.SH',
+            '600519.SH', '002594.SZ', '300750.SZ', '002415.SZ', '000776.SZ',
+            '002230.SZ', '000858.SZ', '600276.SH', '000725.SZ', '002142.SZ'
+        ]
+
+        result = []
+        for ts_code in fallback_stocks[:limit]:
+            try:
+                stock = StockBasic.objects.get(ts_code=ts_code)
+                latest_daily = StockDaily.objects.filter(ts_code=ts_code).order_by('-trade_date').first()
+
+                if latest_daily:
+                    result.append({
+                        'ts_code': ts_code,
+                        'name': stock.name,
+                        'close': float(latest_daily.close) if latest_daily.close else 0,
+                        'change': float(latest_daily.change) if latest_daily.change else 0,
+                        'pct_chg': float(latest_daily.pct_chg) if latest_daily.pct_chg else 0,
+                        'vol': latest_daily.vol if latest_daily.vol else 0,
+                        'amount': float(latest_daily.amount) if latest_daily.amount else 0,
+                        'trade_date': latest_daily.trade_date.strftime('%Y-%m-%d'),
+                        'industry': stock.industry if stock.industry else '未分类',
+                        'data_source': 'local_fallback'
+                    })
+            except:
+                continue
+
+        return result
     
     @staticmethod
     def get_hot_stocks(limit=10):
@@ -817,12 +968,128 @@ class RealTimeDataService:
     
     @staticmethod
     def get_market_overview():
-        """获取市场概况"""
+        """获取市场概况 - 直接从TuShare API获取真实数据"""
+        try:
+            if not pro:
+                return {
+                    'success': False,
+                    'message': 'TuShare API未配置',
+                    'data': None
+                }
+
+            # 获取今日交易数据
+            today = datetime.now().strftime('%Y%m%d')
+
+            try:
+                # 获取今日全市场股票数据
+                df = pro.daily(
+                    trade_date=today,
+                    fields='ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount'
+                )
+
+                # 如果今日没有数据，尝试获取最近交易日数据
+                if df.empty:
+                    # 尝试最近5个交易日
+                    for i in range(1, 6):
+                        date_str = (datetime.now() - timedelta(days=i)).strftime('%Y%m%d')
+                        df = pro.daily(
+                            trade_date=date_str,
+                            fields='ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount'
+                        )
+                        if not df.empty:
+                            break
+
+                if df.empty:
+                    raise Exception("无法获取市场数据")
+
+                # 筛选有效数据（排除ST股票、停牌股票等）
+                valid_df = df[
+                    (df['pct_chg'].notna()) &
+                    (df['vol'] > 0) &  # 有成交量
+                    (~df['ts_code'].str.contains('ST', na=False)) &  # 排除ST股票
+                    (df['close'] > 0)  # 正常交易
+                ].copy()
+
+                # 计算涨跌分布
+                total_count = len(valid_df)
+                up_count = len(valid_df[valid_df['pct_chg'] > 0])
+                down_count = len(valid_df[valid_df['pct_chg'] < 0])
+                flat_count = len(valid_df[valid_df['pct_chg'] == 0])
+
+                # 计算资金流向（基于成交额和涨跌幅的简单估算）
+                up_amount = valid_df[valid_df['pct_chg'] > 0]['amount'].sum()
+                down_amount = valid_df[valid_df['pct_chg'] < 0]['amount'].sum()
+
+                # 主力资金流向估算：涨股成交额的60%视为主力流入，跌股成交额的40%视为主力流出
+                main_flow = (up_amount * 0.6) - (down_amount * 0.4)
+                retail_flow = -main_flow
+
+                market_stats = {
+                    'up_count': up_count,
+                    'down_count': down_count,
+                    'flat_count': flat_count,
+                    'total_count': total_count,
+                    'main_flow': round(main_flow / 10000, 2) if main_flow else 0,  # 转换为万元
+                    'retail_flow': round(retail_flow / 10000, 2) if retail_flow else 0,  # 转换为万元
+                    'trade_date': df.iloc[0]['trade_date'] if not df.empty else today,
+                    'data_source': 'tushare_api'
+                }
+
+                # 获取主要指数数据
+                major_indices = ['000001.SH', '399001.SZ', '399006.SZ']
+                indices_data = []
+
+                try:
+                    index_df = pro.index_daily(
+                        trade_date=df.iloc[0]['trade_date'] if not df.empty else today,
+                        fields='ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount'
+                    )
+
+                    for index_code in major_indices:
+                        index_row = index_df[index_df['ts_code'] == index_code]
+                        if not index_row.empty:
+                            row = index_row.iloc[0]
+                            indices_data.append({
+                                'ts_code': index_code,
+                                'name': RealTimeDataService.get_index_name(index_code),
+                                'current_price': float(row['close']) if row['close'] else 0,
+                                'change': float(row['change']) if row['change'] else 0,
+                                'pct_chg': float(row['pct_chg']) if row['pct_chg'] else 0,
+                                'volume': int(row['vol']) if row['vol'] else 0,
+                                'amount': float(row['amount']) if row['amount'] else 0,
+                            })
+                except Exception as index_error:
+                    print(f"获取指数数据失败: {index_error}")
+
+                return {
+                    'success': True,
+                    'data': {
+                        'indices': indices_data,
+                        'market_stats': market_stats,
+                        'timestamp': timezone.now().isoformat()
+                    }
+                }
+
+            except Exception as api_error:
+                print(f"TuShare API调用失败: {api_error}")
+                # 回退到本地数据库数据
+                return RealTimeDataService.get_market_overview_from_db()
+
+        except Exception as e:
+            return {
+                'success': False,
+                'message': f'获取市场概况失败: {str(e)}',
+                'data': None
+            }
+
+    @staticmethod
+    def get_market_overview_from_db():
+        """从本地数据库获取市场概况（回退方案）"""
         try:
             # 获取主要指数数据
             major_indices = ['000001.SH', '399001.SZ', '399006.SZ']  # 上证指数、深成指、创业板指
             indices_data = []
-            
+
             for index_code in major_indices:
                 try:
                     # 从IndexDaily表获取数据
@@ -839,48 +1106,72 @@ class RealTimeDataService:
                         })
                 except Exception as e:
                     continue
-            
-            # 获取市场统计数据
+
+            # 获取市场统计数据 - 涨跌分布
             latest_date = StockDaily.objects.values('trade_date').order_by('-trade_date').first()
-            market_stats = {}
-            
+            market_stats = {
+                'up_count': 0,
+                'down_count': 0,
+                'flat_count': 0,
+                'total_count': 0,
+                'main_flow': 0,
+                'retail_flow': 0
+            }
+
             if latest_date:
                 daily_data = StockDaily.objects.filter(trade_date=latest_date['trade_date'])
-                
-                # 统计涨跌家数
+
+                # 统计涨跌分布
+                total_count = daily_data.count()
                 up_count = daily_data.filter(pct_chg__gt=0).count()
                 down_count = daily_data.filter(pct_chg__lt=0).count()
-                equal_count = daily_data.filter(pct_chg=0).count()
-                
+                flat_count = daily_data.filter(pct_chg=0).count()
+
+                # 计算资金流向 (基于成交额的简单估算)
+                total_amount = daily_data.aggregate(
+                    total_amount=models.Sum('amount')
+                )['total_amount'] or 0
+
+                # 简化的资金流向计算：
+                # 主力净流入 = 上涨股票成交额 - 下跌股票成交额的40%
+                up_amount = daily_data.filter(pct_chg__gt=0).aggregate(
+                    up_amount=models.Sum('amount')
+                )['up_amount'] or 0
+
+                down_amount = daily_data.filter(pct_chg__lt=0).aggregate(
+                    down_amount=models.Sum('amount')
+                )['down_amount'] or 0
+
+                # 主力净流入估算 (上涨成交额的60% - 下跌成交额的40%)
+                main_flow = (up_amount * 0.6) - (down_amount * 0.4)
+                retail_flow = -main_flow  # 散户流向与主力相反
+
                 market_stats = {
-                    'trade_date': latest_date['trade_date'].strftime('%Y-%m-%d'),
-                    'total_stocks': daily_data.count(),
                     'up_count': up_count,
                     'down_count': down_count,
-                    'equal_count': equal_count,
-                    'up_ratio': round(up_count / daily_data.count() * 100, 2) if daily_data.count() > 0 else 0
+                    'flat_count': flat_count,
+                    'total_count': total_count,
+                    'main_flow': round(main_flow / 100000, 2) if main_flow else 0,  # 转换为万元
+                    'retail_flow': round(retail_flow / 100000, 2) if retail_flow else 0,  # 转换为万元
+                    'trade_date': latest_date['trade_date'].strftime('%Y-%m-%d')
                 }
-            
+
             return {
                 'success': True,
                 'data': {
                     'indices': indices_data,
                     'market_stats': market_stats,
-                    'trading_status': {
-                        'is_trading_time': RealTimeDataService.is_trading_time(),
-                        'time_period': RealTimeDataService.get_time_period(),
-                        'timestamp': datetime.now().isoformat()
-                    }
+                    'timestamp': timezone.now().isoformat()
                 }
             }
-            
+
         except Exception as e:
             return {
                 'success': False,
                 'message': f'获取市场概况失败: {str(e)}',
                 'data': None
             }
-    
+
     @staticmethod
     def get_index_name(ts_code):
         """获取指数名称"""

@@ -131,9 +131,9 @@
             <div class="card-header">
               <span>大盘走势</span>
               <el-radio-group v-model="chartPeriod" size="small" @change="updateChart">
-                <el-radio-button label="1D">日线</el-radio-button>
-                <el-radio-button label="5D">5日</el-radio-button>
-                <el-radio-button label="1M">月线</el-radio-button>
+                <el-radio-button label="realtime">当日实时</el-radio-button>
+                <el-radio-button label="month">近一个月</el-radio-button>
+                <el-radio-button label="year">近一年</el-radio-button>
               </el-radio-group>
             </div>
           </template>
@@ -172,14 +172,14 @@
             <h4>资金流向</h4>
             <div class="flow-item">
               <span>主力净流入:</span>
-              <span class="flow-value" :class="moneyFlow.main_flow > 0 ? 'price-up' : 'price-down'">
-                {{ formatMoney(moneyFlow.main_flow) }}
+              <span class="flow-value" :class="marketStats.main_flow > 0 ? 'price-up' : 'price-down'">
+                {{ formatMoney(marketStats.main_flow) }}
               </span>
             </div>
             <div class="flow-item">
               <span>散户净流入:</span>
-              <span class="flow-value" :class="moneyFlow.retail_flow > 0 ? 'price-up' : 'price-down'">
-                {{ formatMoney(moneyFlow.retail_flow) }}
+              <span class="flow-value" :class="marketStats.retail_flow > 0 ? 'price-up' : 'price-down'">
+                {{ formatMoney(marketStats.retail_flow) }}
               </span>
             </div>
           </div>
@@ -259,7 +259,8 @@ import {
   getHotStocks,
   getLatestNews,
   getMarketOverview,
-  getStockKlineData
+  getStockKlineData,
+  getStockIntradayChart
 } from '@/api/stock'
 import wsService from '@/utils/websocket'
 
@@ -290,7 +291,7 @@ export default {
     return {
       loading: false,
       chartLoading: false,
-      chartPeriod: '1D',
+      chartPeriod: 'realtime',
       marketIndices: [],
       hotStocks: [],
       latestNews: [],
@@ -310,70 +311,28 @@ export default {
   },
   computed: {
     marketChartOption() {
-      if (!this.marketChartData || !Array.isArray(this.marketChartData) || !this.marketChartData.length) {
+      if (!this.marketChartData || !this.marketChartData.data) {
         return {}
       }
-      
-      // 过滤和验证数据
-      const validData = this.marketChartData.filter(item => 
-        item && 
-        typeof item === 'object' && 
-        item.date && 
-        item.close != null && 
-        !isNaN(parseFloat(item.close))
-      )
-      
-      if (validData.length === 0) {
+
+      const { type, data, title } = this.marketChartData
+
+      if (!Array.isArray(data) || data.length === 0) {
         return {}
       }
-      
-      const dates = validData.map(item => item.date)
-      const values = validData.map(item => parseFloat(item.close))
-      
-      return {
-        grid: {
-          left: '3%',
-          right: '4%',
-          bottom: '3%',
-          containLabel: true
-        },
-        xAxis: {
-          type: 'category',
-          boundaryGap: false,
-          data: dates
-        },
-        yAxis: {
-          type: 'value',
-          scale: true
-        },
-        series: [
-          {
-            name: '大盘走势',
-            type: 'line',
-            data: values.filter(val => val != null && !isNaN(val)),
-            smooth: true,
-            symbol: 'none',
-            lineStyle: {
-              color: '#1890ff',
-              width: 2
-            },
-            areaStyle: {
-              color: {
-                type: 'linear',
-                x: 0,
-                y: 0,
-                x2: 0,
-                y2: 1,
-                colorStops: [
-                  { offset: 0, color: 'rgba(24, 144, 255, 0.3)' },
-                  { offset: 1, color: 'rgba(24, 144, 255, 0)' }
-                ]
-              }
-            }
-          }
-        ]
+
+      // 根据数据类型生成不同的图表配置
+      switch (type) {
+        case 'intraday':
+        case 'fallback':
+          return this.generateIntradayChart(data, title)
+        case 'monthly':
+        case 'yearly':
+          return this.generatePriceChart(data, title)
+        default:
+          return {}
       }
-    }
+    },
   },
   async created() {
     await this.loadDashboardData()
@@ -392,7 +351,8 @@ export default {
           this.getHotStocksList(),
           this.getLatestNewsList(),
           this.getMarketChartData(),
-          this.loadWatchlist()
+          this.loadWatchlist(),
+          this.getMarketOverviewData()
         ])
       } catch (error) {
         console.error('加载仪表板数据失败:', error)
@@ -427,53 +387,481 @@ export default {
     async getMarketChartData() {
       this.chartLoading = true
       try {
-        // 获取上证指数数据作为大盘走势
-        const response = await getStockKlineData('000001.SH', {
-          period: 'daily',
-          limit: this.chartPeriod === '1D' ? 30 : this.chartPeriod === '5D' ? 5 : 30
-        })
-        
-        console.log('大盘数据响应:', response.data) // 调试日志
-        
-        if (response.data.code === 200 && response.data.data) {
-          // 处理K线数据格式
-          const klineData = response.data.data.kline_data || []
-          
-          if (klineData.length === 0) {
-            throw new Error('返回的K线数据为空')
-          }
-          
-          // 转换为大盘走势图所需的格式
-          this.marketChartData = klineData.map(item => ({
-            date: item.date,
-            close: item.close,
-            open: item.open,
-            high: item.high,
-            low: item.low,
-            volume: item.volume,
-            change: item.change,
-            pct_chg: item.pct_chg
-          }))
-          
-          console.log('处理后的大盘数据:', this.marketChartData) // 调试日志
-        } else {
-          throw new Error(response.data.msg || '获取大盘数据失败')
+        let response
+
+        switch (this.chartPeriod) {
+          case 'realtime':
+            // 当日实时或上一交易日分时数据
+            response = await this.getIntradayData()
+            break
+          case 'month':
+            // 近一个月收盘价曲线
+            response = await this.getMonthlyClosePrices()
+            break
+          case 'year':
+            // 近一年收盘价曲线
+            response = await this.getYearlyClosePrices()
+            break
         }
+
+        if (response && response.data.code === 200) {
+          this.marketChartData = response.data.data
+        } else {
+          throw new Error(response?.data?.msg || '获取大盘数据失败')
+        }
+
       } catch (error) {
-        console.error('获取市场图表数据失败:', error)
-        this.$message.error(`获取市场图表数据失败: ${error.message}`)
+        console.error('获取大盘数据失败:', error)
+        this.$message.error(`获取大盘数据失败: ${error.message}`)
         this.marketChartData = []
       } finally {
         this.chartLoading = false
       }
     },
-    
-    loadWatchlist() {
-      const saved = localStorage.getItem('stock_watchlist')
-      if (saved) {
-        this.watchlist = JSON.parse(saved)
-      } else {
-        this.watchlist = []
+
+    // 获取分时数据（实时或上一交易日）
+    async getIntradayData() {
+      try {
+        // 先尝试获取当日分时数据
+        const response = await getStockIntradayChart('000001.SH')
+
+        if (response.data.code === 200 && response.data.data) {
+          // 转换分时数据格式
+          const { time, price } = response.data.data
+          if (time && price && time.length > 0) {
+            const chartData = time.map((t, index) => ({
+              time: this.formatIntradayTime(t),
+              price: price[index]
+            }))
+
+            return {
+              data: {
+                code: 200,
+                data: {
+                  type: 'intraday',
+                  data: chartData,
+                  title: this.isCurrentTradingDay() ? '上证指数 - 当日实时' : '上证指数 - 上一交易日'
+                }
+              }
+            }
+          }
+        }
+
+        // 如果分时数据获取失败，回退到日线数据
+        return await this.getDailyFallback()
+      } catch (error) {
+        console.error('获取分时数据失败:', error)
+        return await this.getDailyFallback()
+      }
+    },
+
+    // 获取近一个月收盘价数据
+    async getMonthlyClosePrices() {
+      const response = await getStockKlineData('000001.SH', {
+        period: 'daily',
+        limit: 30
+      })
+
+      if (response.data.code === 200 && response.data.data) {
+        const klineData = response.data.data.kline_data || []
+        const chartData = klineData.map(item => ({
+          date: item.date,
+          price: item.close
+        }))
+
+        return {
+          data: {
+            code: 200,
+            data: {
+              type: 'monthly',
+              data: chartData,
+              title: '上证指数 - 近一个月收盘价'
+            }
+          }
+        }
+      }
+      return response
+    },
+
+    // 获取近一年收盘价数据
+    async getYearlyClosePrices() {
+      const response = await getStockKlineData('000001.SH', {
+        period: 'daily',
+        limit: 250  // 交易日约250天/年
+      })
+
+      if (response.data.code === 200 && response.data.data) {
+        const klineData = response.data.data.kline_data || []
+        const chartData = klineData.map(item => ({
+          date: item.date,
+          price: item.close
+        }))
+
+        return {
+          data: {
+            code: 200,
+            data: {
+              type: 'yearly',
+              data: chartData,
+              title: '上证指数 - 近一年收盘价'
+            }
+          }
+        }
+      }
+      return response
+    },
+
+    // 日线数据回退方案
+    async getDailyFallback() {
+      const response = await getStockKlineData('000001.SH', {
+        period: 'daily',
+        limit: 1
+      })
+
+      if (response.data.code === 200 && response.data.data) {
+        const klineData = response.data.data.kline_data || []
+        if (klineData.length > 0) {
+          const latest = klineData[0]
+          return {
+            data: {
+              code: 200,
+              data: {
+                type: 'fallback',
+                data: [{
+                  time: '09:30',
+                  price: latest.open
+                }, {
+                  time: '15:00',
+                  price: latest.close
+                }],
+                title: '上证指数 - 最新交易日'
+              }
+            }
+          }
+        }
+      }
+      return response
+    },
+
+    // 工具方法
+    isCurrentTradingDay() {
+      const now = new Date()
+      const day = now.getDay()
+      const hour = now.getHours()
+      const minute = now.getMinutes()
+
+      // 工作日判断
+      if (day === 0 || day === 6) return false
+
+      // 交易时间判断
+      const currentTime = hour * 60 + minute
+      const morningStart = 9 * 60 + 30  // 9:30
+      const morningEnd = 11 * 60 + 30   // 11:30
+      const afternoonStart = 13 * 60    // 13:00
+      const afternoonEnd = 15 * 60      // 15:00
+
+      return (currentTime >= morningStart && currentTime <= morningEnd) ||
+             (currentTime >= afternoonStart && currentTime <= afternoonEnd)
+    },
+
+    formatIntradayTime(timeStr) {
+      if (!timeStr) return timeStr
+
+      // 如果是091505格式，转换为09:15
+      if (typeof timeStr === 'string' && timeStr.length === 6 && /^\d{6}$/.test(timeStr)) {
+        const hours = timeStr.substring(0, 2)
+        const minutes = timeStr.substring(2, 4)
+        return `${hours}:${minutes}`
+      }
+
+      return timeStr
+    },
+
+    // 生成分时图配置
+    generateIntradayChart(data, title) {
+      const times = data.map(item => item.time)
+      const prices = data.map(item => item.price)
+
+      return {
+        backgroundColor: '#ffffff',
+        title: {
+          text: title,
+          left: 10,
+          top: 10,
+          textStyle: {
+            color: '#333',
+            fontSize: 16,
+            fontWeight: 'bold'
+          }
+        },
+        tooltip: {
+          trigger: 'axis',
+          axisPointer: {
+            type: 'cross'
+          },
+          backgroundColor: 'rgba(255, 255, 255, 0.95)',
+          borderColor: '#ddd',
+          textStyle: {
+            color: '#333'
+          },
+          formatter: function(params) {
+            if (!params || params.length === 0) return ''
+            const param = params[0]
+            return `
+              <div style="padding: 8px;">
+                <div style="font-weight: bold; margin-bottom: 4px;">${param.name}</div>
+                <div>价格: <span style="color: #1890ff; font-weight: bold;">${param.value}</span></div>
+              </div>
+            `
+          }
+        },
+        grid: {
+          left: '3%',
+          right: '8%',
+          bottom: '10%',
+          top: '60px'
+        },
+        xAxis: {
+          type: 'category',
+          data: times,
+          boundaryGap: false,
+          axisLine: {
+            lineStyle: { color: '#ddd' }
+          },
+          axisLabel: {
+            color: '#666',
+            fontSize: 11
+          },
+          axisTick: {
+            show: true,
+            lineStyle: { color: '#ddd' }
+          }
+        },
+        yAxis: {
+          type: 'value',
+          scale: true,
+          position: 'right',
+          axisLine: { show: false },
+          axisTick: { show: false },
+          axisLabel: {
+            color: '#666',
+            fontSize: 11,
+            formatter: '{value}'
+          },
+          splitLine: {
+            lineStyle: {
+              color: '#f0f0f0',
+              type: 'solid'
+            }
+          }
+        },
+        series: [
+          {
+            name: '分时价格',
+            type: 'line',
+            data: prices,
+            smooth: true,
+            symbol: 'none',
+            lineStyle: {
+              color: '#1890ff',
+              width: 2
+            },
+            areaStyle: {
+              color: {
+                type: 'linear',
+                x: 0,
+                y: 0,
+                x2: 0,
+                y2: 1,
+                colorStops: [{
+                  offset: 0, color: 'rgba(24, 144, 255, 0.3)'
+                }, {
+                  offset: 1, color: 'rgba(24, 144, 255, 0.1)'
+                }]
+              }
+            }
+          }
+        ]
+      }
+    },
+
+    // 生成价格曲线图配置
+    generatePriceChart(data, title) {
+      const dates = data.map(item => item.date)
+      const prices = data.map(item => item.price)
+
+      return {
+        backgroundColor: '#ffffff',
+        title: {
+          text: title,
+          left: 10,
+          top: 10,
+          textStyle: {
+            color: '#333',
+            fontSize: 16,
+            fontWeight: 'bold'
+          }
+        },
+        tooltip: {
+          trigger: 'axis',
+          axisPointer: {
+            type: 'cross'
+          },
+          backgroundColor: 'rgba(255, 255, 255, 0.95)',
+          borderColor: '#ddd',
+          textStyle: {
+            color: '#333'
+          },
+          formatter: function(params) {
+            if (!params || params.length === 0) return ''
+            const param = params[0]
+            return `
+              <div style="padding: 8px;">
+                <div style="font-weight: bold; margin-bottom: 4px;">${param.name}</div>
+                <div>收盘价: <span style="color: #1890ff; font-weight: bold;">${param.value}</span></div>
+              </div>
+            `
+          }
+        },
+        grid: {
+          left: '3%',
+          right: '8%',
+          bottom: '15%',
+          top: '60px'
+        },
+        xAxis: {
+          type: 'category',
+          data: dates,
+          boundaryGap: false,
+          axisLine: {
+            lineStyle: { color: '#ddd' }
+          },
+          axisLabel: {
+            color: '#666',
+            fontSize: 11,
+            formatter: function(value) {
+              // 显示月-日格式
+              return value.length > 7 ? value.substring(5) : value
+            }
+          },
+          axisTick: {
+            show: true,
+            lineStyle: { color: '#ddd' }
+          }
+        },
+        yAxis: {
+          type: 'value',
+          scale: true,
+          position: 'right',
+          axisLine: { show: false },
+          axisTick: { show: false },
+          axisLabel: {
+            color: '#666',
+            fontSize: 11,
+            formatter: '{value}'
+          },
+          splitLine: {
+            lineStyle: {
+              color: '#f0f0f0',
+              type: 'solid'
+            }
+          }
+        },
+        dataZoom: [
+          {
+            type: 'inside',
+            start: 0,
+            end: 100
+          },
+          {
+            show: true,
+            type: 'slider',
+            bottom: 10,
+            start: 0,
+            end: 100,
+            height: 20,
+            fillerColor: 'rgba(24, 144, 255, 0.2)',
+            borderColor: '#d9d9d9',
+            handleStyle: {
+              color: '#fff',
+              borderColor: '#1890ff'
+            },
+            textStyle: {
+              color: '#666'
+            }
+          }
+        ],
+        series: [
+          {
+            name: '收盘价',
+            type: 'line',
+            data: prices,
+            smooth: true,
+            symbol: 'none',
+            lineStyle: {
+              color: '#1890ff',
+              width: 2
+            },
+            areaStyle: {
+              color: {
+                type: 'linear',
+                x: 0,
+                y: 0,
+                x2: 0,
+                y2: 1,
+                colorStops: [{
+                  offset: 0, color: 'rgba(24, 144, 255, 0.2)'
+                }, {
+                  offset: 1, color: 'rgba(24, 144, 255, 0.05)'
+                }]
+              }
+            }
+          }
+        ]
+      }
+    },
+
+    async getMarketOverviewData() {
+      try {
+        const response = await getMarketOverview()
+        if (response.data.code === 200 && response.data.data) {
+          const marketStats = response.data.data.market_stats || {}
+
+          // 更新涨跌分布数据
+          this.marketStats.up_count = marketStats.up_count || 0
+          this.marketStats.down_count = marketStats.down_count || 0
+          this.marketStats.flat_count = marketStats.flat_count || 0
+          this.marketStats.main_flow = marketStats.main_flow || 0
+          this.marketStats.retail_flow = marketStats.retail_flow || 0
+
+          console.log('市场概况数据获取成功:', marketStats)
+        }
+      } catch (error) {
+        console.error('获取市场概况失败:', error)
+      }
+    },
+
+    async loadWatchlist() {
+      try {
+        // 从后端API获取自选股
+        const { getUserWatchList } = await import('@/api/trading')
+        const response = await getUserWatchList()
+
+        if (response.data.code === 200) {
+          this.watchlist = response.data.data || []
+        } else {
+          console.error('获取自选股失败:', response.data.msg)
+          this.watchlist = []
+        }
+      } catch (error) {
+        console.error('获取自选股失败:', error)
+        // 回退到localStorage（兼容性）
+        const saved = localStorage.getItem('stock_watchlist')
+        if (saved) {
+          this.watchlist = JSON.parse(saved)
+        } else {
+          this.watchlist = []
+        }
       }
     },
     async refreshHotStocks() {
@@ -490,6 +878,7 @@ export default {
       this.refreshTimer = setInterval(() => {
         this.getHotStocksList()
         this.getMarketChartData()
+        this.getMarketOverviewData()
       }, 30000) // 30秒刷新一次
     },
     stopAutoRefresh() {
@@ -514,16 +903,16 @@ export default {
       this.$router.push('/stock/news')
     },
     goToPortfolio() {
-      this.$router.push('/stock/portfolio')
+      this.$router.push('/stock/positions')
     },
     goToTradeHistory() {
-      this.$router.push('/stock/history')
+      this.$router.push('/stock/records')
     },
     goToRiskManagement() {
-      this.$router.push('/stock/risk')
+      this.$router.push('/stock/account')
     },
     goToDataAnalysis() {
-      this.$router.push('/stock/analysis')
+      this.$router.push('/stock/watchlist')
     },
     getPriceClass(pctChg) {
       if (!pctChg) return ''
@@ -552,6 +941,27 @@ export default {
         return (value / 10000).toFixed(2) + '万'
       }
       return value.toLocaleString()
+    },
+
+    // 计算移动平均线
+    calculateMA(data, period) {
+      if (!data || data.length < period) return []
+
+      const result = []
+      for (let i = 0; i < data.length; i++) {
+        if (i < period - 1) {
+          result.push(null)
+        } else {
+          let sum = 0
+          for (let j = 0; j < period; j++) {
+            if (data[i - j] && data[i - j][1]) { // 使用收盘价计算
+              sum += parseFloat(data[i - j][1])
+            }
+          }
+          result.push((sum / period).toFixed(2))
+        }
+      }
+      return result
     },
     
     // WebSocket 相关方法

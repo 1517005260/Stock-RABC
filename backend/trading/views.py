@@ -20,6 +20,28 @@ from datetime import datetime
 import time
 
 
+def _is_trading_time():
+    """检查是否为交易时间"""
+    from datetime import datetime, time as dt_time
+
+    now = datetime.now()
+    current_time = now.time()
+    weekday = now.weekday()
+
+    # 周末不交易 (5=Saturday, 6=Sunday)
+    if weekday >= 5:
+        return False
+
+    # 交易时间：9:30-11:30, 13:00-15:00
+    morning_start = dt_time(9, 30)
+    morning_end = dt_time(11, 30)
+    afternoon_start = dt_time(13, 0)
+    afternoon_end = dt_time(15, 0)
+
+    return (morning_start <= current_time <= morning_end) or \
+           (afternoon_start <= current_time <= afternoon_end)
+
+
 @require_login
 @csrf_exempt
 @require_http_methods(["POST"])
@@ -29,6 +51,14 @@ def buy_stock(request):
     支持AJAX请求，返回JSON响应
     """
     try:
+        # 交易时间检查
+        if not _is_trading_time():
+            return JsonResponse({
+                'flag': 0,
+                'money': 1,
+                'msg': '当前非交易时间！交易时间：工作日 9:30-11:30, 13:00-15:00'
+            })
+
         # 获取当前用户
         user = SysUser.objects.get(id=request.user_id)
         
@@ -166,6 +196,13 @@ def buy_stock(request):
 def sell_stock(request):
     """卖出股票 - 所有用户可访问"""
     try:
+        # 交易时间检查
+        if not _is_trading_time():
+            return JsonResponse({
+                'code': 400,
+                'msg': '当前非交易时间！交易时间：工作日 9:30-11:30, 13:00-15:00'
+            })
+
         # 获取当前用户
         user = SysUser.objects.get(id=request.user_id)
         

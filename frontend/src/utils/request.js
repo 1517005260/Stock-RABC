@@ -3,7 +3,7 @@ import { ElMessage } from 'element-plus'
 
 // 创建axios实例
 const request = axios.create({
-  baseURL: process.env.VUE_APP_BASE_API || 'http://localhost:8000',
+  baseURL: process.env.VUE_APP_BASE_API || 'http://localhost:8000/api' || 'http://localhost:8000',
   timeout: 15000
 })
 

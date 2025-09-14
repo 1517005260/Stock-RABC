@@ -1,11 +1,25 @@
 <template>
   <div class="app-container">
-    <!-- 返回按钮 -->
+    <!-- 返回按钮和操作按钮 -->
     <div class="header-actions">
       <el-button @click="goBack">
         <el-icon><ArrowLeft /></el-icon>
         返回股票列表
       </el-button>
+
+      <div class="stock-actions">
+        <el-button
+          :type="isInWatchlist ? 'danger' : 'warning'"
+          @click="toggleWatchlist"
+          :loading="watchlistLoading"
+        >
+          <el-icon>
+            <StarFilled v-if="isInWatchlist" />
+            <Star v-else />
+          </el-icon>
+          {{ isInWatchlist ? '取消自选' : '加入自选' }}
+        </el-button>
+      </div>
     </div>
 
     <!-- 股票基本信息 -->
@@ -91,13 +105,13 @@
                 >
                   实时股价
                 </el-button>
-                <el-button 
-                  type="success" 
-                  size="small" 
+                <el-button
+                  type="success"
+                  size="small"
                   @click="openTradeDialog"
-                  :disabled="!hasTradePermission"
+                  :disabled="!isMarketOpen"
                 >
-                  买入
+                  {{ isMarketOpen ? '买入' : '闭市中' }}
                 </el-button>
               </div>
             </div>
@@ -216,7 +230,7 @@
 </template>
 
 <script>
-import { ArrowLeft } from '@element-plus/icons-vue'
+import { ArrowLeft, Star, StarFilled } from '@element-plus/icons-vue'
 import { getStockDetail, getRealtimeData } from '@/api/stock'
 import { buyStock } from '@/api/trading'
 import KlineChart from '@/components/KlineChart.vue'
@@ -250,6 +264,8 @@ export default {
   name: 'StockDetail',
   components: {
     ArrowLeft,
+    Star,
+    StarFilled,
     KlineChart,
     StockHoldersChart,
     VChart
@@ -267,7 +283,9 @@ export default {
       },
       tradeExecuting: false,
       hasTradePermission: true, // 模拟交易权限
-      realtimeTimer: null
+      realtimeTimer: null,
+      watchlistLoading: false,
+      isInWatchlist: false
     }
   },
   computed: {
@@ -278,8 +296,20 @@ export default {
     isMarketOpen() {
       const now = new Date()
       const hour = now.getHours()
-      // 简单的开盘时间判断：9:00-15:00
-      return hour >= 9 && hour <= 15
+      const minute = now.getMinutes()
+      const currentTime = hour * 100 + minute // 转换为HHMM格式，如 930, 1500
+      const day = now.getDay()
+
+      // 周末不开盘
+      if (day === 0 || day === 6) {
+        return false
+      }
+
+      // 工作日交易时间：9:30-11:30, 13:00-15:00
+      const isOpenSession = (currentTime >= 930 && currentTime <= 1130) ||
+                           (currentTime >= 1300 && currentTime <= 1500)
+
+      return isOpenSession
     },
     
     realtimeChartOption() {
@@ -423,6 +453,7 @@ export default {
   },
   async created() {
     await this.getStockDetail()
+    this.checkWatchlistStatus()
   },
   beforeUnmount() {
     this.clearRealtimeTimer()
@@ -454,10 +485,10 @@ export default {
     
     switchToRealtime() {
       if (!this.isMarketOpen) {
-        this.$message.warning('当前非开盘时间！！')
+        this.$message.warning('当前非交易时间，无法查看实时股价！交易时间：工作日 9:30-11:30, 13:00-15:00')
         return
       }
-      
+
       this.chartMode = 'realtime'
       this.loadRealtimeData()
       this.startRealtimeTimer()
@@ -513,16 +544,22 @@ export default {
     },
     
     async executeTrade() {
+      // 交易时间检查
+      if (!this.isMarketOpen) {
+        this.$message.error('当前非交易时间！交易时间：工作日 9:30-11:30, 13:00-15:00')
+        return
+      }
+
       if (!this.tradeForm.shares || this.tradeForm.shares < 100) {
         this.$message.warning('交易数量不能少于100股')
         return
       }
-      
+
       if (this.tradeForm.shares % 100 !== 0) {
         this.$message.warning('交易数量必须是100的整数倍')
         return
       }
-      
+
       this.tradeExecuting = true
       try {
         const response = await buyStock({
@@ -584,6 +621,47 @@ export default {
         return (amount / 10000).toFixed(2) + '万元'
       }
       return amount.toFixed(2) + '元'
+    },
+
+    // 自选股票相关方法
+    checkWatchlistStatus() {
+      const savedCodes = JSON.parse(localStorage.getItem('watchlist_codes') || '[]')
+      this.isInWatchlist = savedCodes.includes(this.tsCode)
+    },
+
+    async toggleWatchlist() {
+      if (!this.stockDetail) {
+        this.$message.warning('股票信息未加载完成')
+        return
+      }
+
+      this.watchlistLoading = true
+
+      try {
+        const savedCodes = JSON.parse(localStorage.getItem('watchlist_codes') || '[]')
+
+        if (this.isInWatchlist) {
+          // 从自选中移除
+          const index = savedCodes.indexOf(this.tsCode)
+          if (index > -1) {
+            savedCodes.splice(index, 1)
+            localStorage.setItem('watchlist_codes', JSON.stringify(savedCodes))
+            this.isInWatchlist = false
+            this.$message.success(`已将 ${this.stockDetail.name} 从自选股中移除`)
+          }
+        } else {
+          // 添加到自选
+          savedCodes.unshift(this.tsCode)
+          localStorage.setItem('watchlist_codes', JSON.stringify(savedCodes))
+          this.isInWatchlist = true
+          this.$message.success(`已将 ${this.stockDetail.name} 添加到自选股`)
+        }
+      } catch (error) {
+        console.error('操作自选股失败:', error)
+        this.$message.error('操作失败，请重试')
+      } finally {
+        this.watchlistLoading = false
+      }
     }
   }
 }
@@ -596,6 +674,14 @@ export default {
 
 .header-actions {
   margin-bottom: 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.stock-actions {
+  display: flex;
+  gap: 10px;
 }
 
 .stock-info {

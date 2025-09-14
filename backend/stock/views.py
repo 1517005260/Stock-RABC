@@ -34,52 +34,49 @@ else:
 
 @require_login
 def stock_list(request):
-    """股票列表 - 所有用户可访问，自动同步真实数据"""
+    """股票列表 - 展示真实数据，支持惰性更新后的数据同步"""
     try:
-        from stock.services import StockDataService
-        
-        # 检查是否有股票数据，如果没有则自动同步
-        if not StockBasic.objects.exists():
-            sync_result = StockDataService.sync_stock_basic()
-            if not sync_result['success']:
-                return JsonResponse({
-                    'code': 500,
-                    'msg': f'同步股票基本信息失败: {sync_result["message"]}'
-                })
-        
         # 获取查询参数
         page = int(request.GET.get('page', 1))
         page_size = int(request.GET.get('pageSize', 20))
         keyword = request.GET.get('keyword', '').strip()
         industry = request.GET.get('industry', '').strip()
         market = request.GET.get('market', '').strip()
-        
+
+        # 检查是否有股票基本信息
+        stock_count = StockBasic.objects.count()
+        if stock_count == 0:
+            return JsonResponse({
+                'code': 404,
+                'msg': '系统中无股票数据，请先运行 python init_system.py 初始化系统'
+            })
+
         # 构建查询条件
         queryset = StockBasic.objects.filter(list_status='L')  # 只显示上市股票
-        
+
         if keyword:
             queryset = queryset.filter(
-                Q(name__icontains=keyword) | 
+                Q(name__icontains=keyword) |
                 Q(ts_code__icontains=keyword) |
                 Q(symbol__icontains=keyword)
             )
-        
+
         if industry:
             queryset = queryset.filter(industry=industry)
-        
+
         if market:
             queryset = queryset.filter(market=market)
-        
+
         # 分页
         paginator = Paginator(queryset.order_by('ts_code'), page_size)
         stocks = paginator.get_page(page)
-        
-        # 序列化数据
+
+        # 序列化数据 - 展示真实的最新数据
         stock_list = []
         for stock in stocks:
-            # 获取最新行情数据
+            # 获取最新行情数据 (惰性更新后的数据)
             latest_daily = StockDaily.objects.filter(ts_code=stock.ts_code).order_by('-trade_date').first()
-            
+
             stock_data = {
                 'ts_code': stock.ts_code,
                 'symbol': stock.symbol,
@@ -88,15 +85,18 @@ def stock_list(request):
                 'market': stock.market,
                 'area': stock.area,
                 'list_date': stock.list_date.strftime('%Y-%m-%d') if stock.list_date else None,
+                # 展示真实的最新行情数据
                 'current_price': float(latest_daily.close) if latest_daily and latest_daily.close else None,
                 'change': float(latest_daily.change) if latest_daily and latest_daily.change else None,
                 'pct_chg': float(latest_daily.pct_chg) if latest_daily and latest_daily.pct_chg else None,
                 'volume': latest_daily.vol if latest_daily else None,
                 'amount': float(latest_daily.amount) if latest_daily and latest_daily.amount else None,
                 'trade_date': latest_daily.trade_date.strftime('%Y-%m-%d') if latest_daily else None,
+                # 数据新鲜度标识
+                'data_freshness': _get_data_freshness(latest_daily) if latest_daily else 'no_data',
             }
             stock_list.append(stock_data)
-        
+
         return JsonResponse({
             'code': 200,
             'msg': '获取成功',
@@ -106,69 +106,94 @@ def stock_list(request):
                 'page': page,
                 'pageSize': page_size,
                 'totalPages': paginator.num_pages,
+                'summary': {
+                    'total_stocks': stock_count,
+                    'with_data': len([s for s in stock_list if s['current_price'] is not None]),
+                    'last_update': datetime.now().isoformat(),
+                }
             }
         })
-        
+
     except Exception as e:
         return JsonResponse({
             'code': 500,
             'msg': f'获取股票列表失败: {str(e)}'
         })
 
+def _get_data_freshness(latest_daily):
+    """获取数据新鲜度标识"""
+    if not latest_daily:
+        return 'no_data'
+
+    from datetime import datetime
+    days_old = (datetime.now().date() - latest_daily.trade_date).days
+
+    if days_old == 0:
+        return 'today'
+    elif days_old == 1:
+        return 'yesterday'
+    elif days_old <= 3:
+        return 'recent'
+    else:
+        return 'old'
+
 
 @require_login
 def stock_detail(request, ts_code):
-    """股票详情 - 点击时自动获取最新数据，参考sample项目策略"""
+    """股票详情 - 惰性更新策略：点击时检查并更新最新数据"""
     try:
+        from stock.services import StockDataService, RateLimiter
+        from datetime import datetime, timedelta
+
         # 获取股票基本信息，如果不存在则尝试同步
         try:
             stock = StockBasic.objects.get(ts_code=ts_code)
         except StockBasic.DoesNotExist:
-            # 股票不存在，尝试同步股票基本信息
-            sync_result = StockDataService.sync_stock_basic()
-            if sync_result['success']:
+            return JsonResponse({
+                'code': 404,
+                'msg': f'股票代码 {ts_code} 不存在，请先运行 python init_system.py 初始化股票基本信息'
+            })
+
+        # 惰性更新策略：检查是否需要更新数据
+        latest_daily = StockDaily.objects.filter(ts_code=ts_code).order_by('-trade_date').first()
+
+        should_update = False
+        update_reason = ""
+
+        if not latest_daily:
+            should_update = True
+            update_reason = "无历史数据"
+        else:
+            # 检查数据新鲜度 - 如果是交易日且数据是昨天之前的，则更新
+            days_old = (datetime.now().date() - latest_daily.trade_date).days
+            if days_old >= 1:  # 数据超过1天就更新
+                should_update = True
+                update_reason = f"数据过旧({days_old}天)"
+
+        # 惰性更新：仅在用户点击时更新
+        if should_update:
+            print(f"[惰性更新] 股票 {ts_code} {update_reason}，开始更新...")
+
+            # 使用限流机制避免API调用过频繁
+            api_key = f"stock_detail_{ts_code}"
+            if RateLimiter.can_call(api_key, max_calls=1, time_window=60):  # 1分钟内同一股票只能调用1次
+                RateLimiter.record_call(api_key)
+
                 try:
-                    stock = StockBasic.objects.get(ts_code=ts_code)
-                except StockBasic.DoesNotExist:
-                    return JsonResponse({
-                        'code': 404,
-                        'msg': f'股票代码 {ts_code} 不存在'
-                    })
+                    # 同步最新30天数据 (足够K线图使用)
+                    sync_result = StockDataService.sync_stock_daily(ts_code, days=30)
+                    if sync_result['success']:
+                        print(f"[惰性更新] 成功同步 {ts_code} 的 {sync_result.get('count', 0)} 条数据")
+                        latest_daily = StockDaily.objects.filter(ts_code=ts_code).order_by('-trade_date').first()
+                    else:
+                        print(f"[惰性更新] 同步 {ts_code} 数据失败: {sync_result['message']}")
+                except Exception as sync_error:
+                    print(f"[惰性更新] 同步 {ts_code} 出现异常: {sync_error}")
             else:
-                return JsonResponse({
-                    'code': 404,
-                    'msg': '股票不存在且同步失败'
-                })
-
-        # 参考sample项目：点击时自动获取/更新最新数据
-        try:
-            # 检查是否有日线数据，没有则同步
-            latest_daily = StockDaily.objects.filter(ts_code=ts_code).order_by('-trade_date').first()
-
-            # 如果没有数据或数据过旧（超过3天），则同步最新数据
-            should_sync = False
-            if not latest_daily:
-                should_sync = True
-                print(f"股票 {ts_code} 无历史数据，开始同步...")
-            else:
-                from datetime import datetime, timedelta
-                # 检查数据是否过旧
-                days_old = (datetime.now().date() - latest_daily.trade_date).days
-                if days_old > 3:
-                    should_sync = True
-                    print(f"股票 {ts_code} 数据过旧({days_old}天)，开始更新...")
-
-            # 同步最新数据
-            if should_sync:
-                sync_result = StockDataService.sync_stock_daily(ts_code, days=90)  # 同步3个月数据
-                if sync_result['success']:
-                    print(f"成功同步 {ts_code} 的 {sync_result['count']} 条数据")
-                    latest_daily = StockDaily.objects.filter(ts_code=ts_code).order_by('-trade_date').first()
-                else:
-                    print(f"同步 {ts_code} 数据失败: {sync_result['message']}")
-
-        except Exception as sync_error:
-            print(f"数据同步过程出错: {sync_error}")
+                wait_time = RateLimiter.get_wait_time(api_key, max_calls=1, time_window=60)
+                print(f"[惰性更新] 股票 {ts_code} API限流中，还需等待{int(wait_time)}秒")
+        else:
+            print(f"[惰性更新] 股票 {ts_code} 数据较新，无需更新")
 
         # 获取历史行情数据（最近250天，足够画K线图）
         history_data = StockDaily.objects.filter(ts_code=ts_code).order_by('-trade_date')[:250]
@@ -773,7 +798,7 @@ def stock_kline_data(request, ts_code):
                     'msg': f'获取指数数据失败: {str(e)}'
                 })
         else:
-            # 股票数据 - 参考sample项目策略：优先使用实时API，回退到本地数据
+                # 股票数据 - 参考sample项目策略：优先使用实时API，回退到本地数据
             stock_name = ts_code
             kline_data = []
 
@@ -966,7 +991,23 @@ def stock_kline_data(request, ts_code):
                 print(f"计算技术指标失败: {tech_error}")
                 technical_indicators = {}
 
-        # 创建ECharts安全格式
+        # 创建前端KlineChart组件需要的数据格式
+        # 前端期望格式: { dates, kline, ma5, ma10, ma20, ma30 }
+        kline_chart_data = {
+            'dates': [item['date'] for item in kline_data],
+            'kline': [[
+                item['open'],   # 开盘
+                item['close'],  # 收盘
+                item['low'],    # 最低
+                item['high']    # 最高
+            ] for item in kline_data],
+            'ma5': technical_indicators.get('ma5', []),
+            'ma10': technical_indicators.get('ma10', []),
+            'ma20': technical_indicators.get('ma20', []),
+            'ma30': technical_indicators.get('ma60', [])  # 使用ma60作为ma30的替代
+        }
+
+        # 保持原有的ECharts格式用于其他用途
         echarts_data = {
             'dates': [item['date'] for item in kline_data],
             'values': [[
@@ -1001,6 +1042,8 @@ def stock_kline_data(request, ts_code):
                 'latest_info': kline_data[-1] if kline_data else None,
                 'data_source': data_source if 'data_source' in locals() else 'unknown',
                 'last_update': datetime.now().isoformat(),
+                # 前端KlineChart组件需要的格式
+                **kline_chart_data,  # 直接展开 dates, kline, ma5, ma10, ma20, ma30
                 # ECharts专用格式 - 确保数据安全
                 'echarts_data': echarts_data,
                 # 二维数组格式（ECharts标准格式）

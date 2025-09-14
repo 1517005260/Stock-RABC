@@ -141,15 +141,29 @@ export default {
     
     async loadKlineData() {
       if (!this.tsCode) return
-      
+
       this.loading = true
       try {
         const response = await getStockKlineData(this.tsCode, {
-          start_date: '20230101'
+          start_date: '20220101', // 修改为两年前
+          limit: 500
         })
-        
+
+        console.log('K线数据响应:', response.data) // 调试日志
+
         if (response.data.code === 200) {
-          this.klineData = response.data.data
+          // 后端返回的数据结构现在包含 dates, kline, ma5, ma10, ma20, ma30
+          this.klineData = {
+            dates: response.data.data.dates || [],
+            kline: response.data.data.kline || [],
+            ma5: response.data.data.ma5 || [],
+            ma10: response.data.data.ma10 || [],
+            ma20: response.data.data.ma20 || [],
+            ma30: response.data.data.ma30 || []
+          }
+
+          console.log('解析后的K线数据:', this.klineData) // 调试日志
+
           if (this.chartType === 'kline') {
             this.renderKlineChart()
           }

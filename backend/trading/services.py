@@ -51,21 +51,46 @@ class TradingService:
     
     @staticmethod
     def get_user_positions(user: SysUser) -> List[Dict]:
-        """获取用户持仓信息"""
+        """获取用户持仓信息 - 提供实时股价"""
+        from stock.services import RealTimeDataService
+
         positions = UserPosition.objects.filter(user=user)
         result = []
-        
+
         for position in positions:
-            # 获取最新价格
+            # 尝试获取实时价格，如果失败则使用最新收盘价
+            current_price = float(position.current_price)  # 默认价格
+
+            # 首先尝试实时数据服务
             try:
-                latest_daily = StockDaily.objects.filter(ts_code=position.ts_code).order_by('-trade_date').first()
-                current_price = float(latest_daily.close) if latest_daily and latest_daily.close else float(position.current_price)
-            except:
-                current_price = float(position.current_price)
-            
+                real_time_result = RealTimeDataService.get_stock_realtime_price(position.ts_code)
+                if real_time_result.get('success') and real_time_result.get('data'):
+                    current_price = float(real_time_result['data']['current_price'])
+                    # 更新持仓表中的当前价格
+                    position.current_price = Decimal(str(current_price))
+                    position.save()
+                else:
+                    # 回退到最新收盘价
+                    latest_daily = StockDaily.objects.filter(ts_code=position.ts_code).order_by('-trade_date').first()
+                    if latest_daily and latest_daily.close:
+                        current_price = float(latest_daily.close)
+                        position.current_price = latest_daily.close
+                        position.save()
+            except Exception as e:
+                # 如果实时数据获取失败，使用最新收盘价作为回退
+                try:
+                    latest_daily = StockDaily.objects.filter(ts_code=position.ts_code).order_by('-trade_date').first()
+                    if latest_daily and latest_daily.close:
+                        current_price = float(latest_daily.close)
+                        position.current_price = latest_daily.close
+                        position.save()
+                except:
+                    pass  # 保持原有价格
+
+            # 计算市值和盈亏
             market_value = position.position_shares * Decimal(str(current_price))
             profit_loss = market_value - (position.position_shares * position.cost_price)
-            
+
             result.append({
                 'ts_code': position.ts_code,
                 'stock_name': position.stock_name,
@@ -75,9 +100,10 @@ class TradingService:
                 'current_price': current_price,
                 'market_value': float(market_value),
                 'profit_loss': float(profit_loss),
-                'profit_loss_ratio': float(profit_loss / (position.position_shares * position.cost_price) * 100) if position.cost_price > 0 else 0
+                'profit_loss_ratio': float(profit_loss / (position.position_shares * position.cost_price) * 100) if position.cost_price > 0 else 0,
+                'is_real_time': True  # 标识这是实时价格
             })
-        
+
         return result
     
     @staticmethod

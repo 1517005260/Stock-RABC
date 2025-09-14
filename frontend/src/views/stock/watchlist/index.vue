@@ -181,8 +181,16 @@
           <el-row :gutter="10">
             <el-col :span="12" v-for="stock in popularStocks" :key="stock.ts_code">
               <div class="popular-item" @click="addToWatchlist(stock)">
-                <span class="stock-name">{{ stock.name }}</span>
-                <span class="stock-code">{{ stock.ts_code }}</span>
+                <div class="stock-info">
+                  <span class="stock-name">{{ stock.name }}</span>
+                  <span class="stock-code">{{ stock.ts_code }}</span>
+                </div>
+                <div class="stock-price">
+                  <span class="current-price">{{ formatPrice(stock.close || stock.current_price) }}</span>
+                  <span :class="getPriceClass(stock.pct_chg)" class="price-change">
+                    {{ formatPercent(stock.pct_chg) }}
+                  </span>
+                </div>
               </div>
             </el-col>
           </el-row>
@@ -198,7 +206,8 @@
 
 <script>
 import { Plus, Refresh, Search } from '@element-plus/icons-vue'
-import { getStockList, getStockRealtime } from '@/api/stock'
+import { getStockList, getStockRealtime, getHotStocks } from '@/api/stock'
+import { getUserWatchList, addToWatchList, removeFromWatchList } from '@/api/trading'
 
 export default {
   name: 'StockWatchlist',
@@ -236,19 +245,31 @@ export default {
     async loadWatchlist() {
       this.loading = true
       try {
-        // 从本地存储获取自选股代码列表
-        const savedCodes = JSON.parse(localStorage.getItem('watchlist_codes') || '[]')
-        
-        if (savedCodes.length === 0) {
-          this.watchlist = []
+        // 从后端API获取自选股
+        const response = await getUserWatchList()
+
+        if (response.data.code === 200) {
+          this.watchlist = response.data.data || []
+          console.log('从API获取自选股成功:', this.watchlist)
         } else {
-          // 获取实时数据
-          const promises = savedCodes.map(code => this.getStockData(code))
-          const results = await Promise.allSettled(promises)
-          
-          this.watchlist = results
-            .filter(result => result.status === 'fulfilled' && result.value)
-            .map(result => result.value)
+          console.error('API获取自选股失败:', response.data.msg)
+
+          // 如果API失败，回退到localStorage方式
+          const savedCodes = JSON.parse(localStorage.getItem('watchlist_codes') || '[]')
+
+          if (savedCodes.length === 0) {
+            this.watchlist = []
+          } else {
+            // 获取实时数据
+            const promises = savedCodes.map(code => this.getStockData(code))
+            const results = await Promise.allSettled(promises)
+
+            this.watchlist = results
+              .filter(result => result.status === 'fulfilled' && result.value)
+              .map(result => result.value)
+
+            console.log('从localStorage获取自选股:', this.watchlist)
+          }
         }
       } catch (error) {
         console.error('加载自选股失败:', error)
@@ -269,8 +290,17 @@ export default {
         return null
       }
     },
-    loadPopularStocks() {
-      this.popularStocks = []
+    async loadPopularStocks() {
+      try {
+        const response = await getHotStocks({ limit: 8 })
+        if (response.data.code === 200) {
+          this.popularStocks = response.data.data.list || response.data.data || []
+          console.log('热门股票加载成功:', this.popularStocks.length, '只')
+        }
+      } catch (error) {
+        console.error('加载热门股票失败:', error)
+        this.popularStocks = []
+      }
     },
     async searchStocks() {
       if (!this.searchKeyword.trim()) {
@@ -298,7 +328,7 @@ export default {
       await this.loadWatchlist()
       this.$message.success('自选股已刷新')
     },
-    addToWatchlist(stock) {
+    async addToWatchlist(stock) {
       // 检查是否已存在
       const exists = this.watchlist.find(item => item.ts_code === stock.ts_code)
       if (exists) {
@@ -306,33 +336,76 @@ export default {
         return
       }
 
-      // 添加到列表
-      this.watchlist.unshift(stock)
-      
-      // 保存到本地存储
-      const codes = this.watchlist.map(item => item.ts_code)
-      localStorage.setItem('watchlist_codes', JSON.stringify(codes))
-      
-      this.$message.success(`已添加 ${stock.name} 到自选股`)
-      this.showAddDialog = false
-      this.resetAddForm()
+      try {
+        // 调用后端API添加自选股
+        const response = await addToWatchList({
+          ts_code: stock.ts_code
+        })
+
+        if (response.data.code === 200) {
+          // API添加成功后更新前端列表
+          this.watchlist.unshift({
+            ts_code: stock.ts_code,
+            stock_name: stock.name,
+            name: stock.name,
+            current_price: stock.current_price || stock.close,
+            change: stock.change,
+            pct_chg: stock.pct_chg
+          })
+
+          this.$message.success(`已添加 ${stock.name} 到自选股`)
+          this.showAddDialog = false
+          this.resetAddForm()
+        } else {
+          throw new Error(response.data.msg || '添加失败')
+        }
+      } catch (error) {
+        console.error('添加自选股失败:', error)
+
+        // API失败时回退到localStorage
+        this.watchlist.unshift(stock)
+        const codes = this.watchlist.map(item => item.ts_code)
+        localStorage.setItem('watchlist_codes', JSON.stringify(codes))
+
+        this.$message.success(`已添加 ${stock.name} 到自选股 (本地存储)`)
+        this.showAddDialog = false
+        this.resetAddForm()
+      }
     },
     removeFromWatchlist(stock) {
       this.$confirm(`确定要从自选股中删除 ${stock.name} 吗？`, '确认删除', {
         confirmButtonText: '确定',
         cancelButtonText: '取消',
         type: 'warning'
-      }).then(() => {
-        // 从列表中移除
-        const index = this.watchlist.findIndex(item => item.ts_code === stock.ts_code)
-        if (index > -1) {
-          this.watchlist.splice(index, 1)
-          
-          // 更新本地存储
-          const codes = this.watchlist.map(item => item.ts_code)
-          localStorage.setItem('watchlist_codes', JSON.stringify(codes))
-          
-          this.$message.success(`已删除 ${stock.name}`)
+      }).then(async () => {
+        try {
+          // 调用后端API删除自选股
+          const response = await removeFromWatchList(stock.ts_code)
+
+          if (response.data.code === 200) {
+            // API删除成功后更新前端列表
+            const index = this.watchlist.findIndex(item => item.ts_code === stock.ts_code)
+            if (index > -1) {
+              this.watchlist.splice(index, 1)
+            }
+            this.$message.success(`已删除 ${stock.name}`)
+          } else {
+            throw new Error(response.data.msg || '删除失败')
+          }
+        } catch (error) {
+          console.error('删除自选股失败:', error)
+
+          // API失败时回退到localStorage
+          const index = this.watchlist.findIndex(item => item.ts_code === stock.ts_code)
+          if (index > -1) {
+            this.watchlist.splice(index, 1)
+
+            // 更新本地存储
+            const codes = this.watchlist.map(item => item.ts_code)
+            localStorage.setItem('watchlist_codes', JSON.stringify(codes))
+
+            this.$message.success(`已删除 ${stock.name} (本地存储)`)
+          }
         }
       }).catch(() => {
         // 取消删除
@@ -519,6 +592,28 @@ export default {
 
 .popular-item:hover {
   background-color: #e6f7ff;
+}
+
+.popular-item .stock-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.popular-item .stock-price {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.popular-item .current-price {
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.popular-item .price-change {
+  font-size: 11px;
+  margin-top: 2px;
 }
 
 .price-up {

@@ -4,7 +4,18 @@
       <template #header>
         <div class="card-header">
           <span>我的持仓</span>
-          <el-button @click="refreshPositions" :loading="loading">刷新</el-button>
+          <div class="header-actions">
+            <el-switch
+              v-model="autoRefresh"
+              @change="toggleAutoRefresh"
+              active-text="自动刷新"
+              inactive-text="手动刷新"
+            />
+            <el-button @click="refreshPositions" :loading="loading">
+              <el-icon><Refresh /></el-icon>
+              刷新
+            </el-button>
+          </div>
         </div>
       </template>
       
@@ -24,7 +35,17 @@
         </el-table-column>
         <el-table-column prop="current_price" label="现价" width="120" align="right" sortable="custom">
           <template #default="scope">
-            ¥{{ scope.row.current_price?.toFixed(2) || '--' }}
+            <div class="price-cell">
+              <span :class="{
+                'price-up': scope.row.profit_loss > 0,
+                'price-down': scope.row.profit_loss < 0
+              }">
+                ¥{{ scope.row.current_price?.toFixed(2) || '--' }}
+              </span>
+              <div class="price-update-time" v-if="scope.row.is_real_time">
+                {{ formatUpdateTime() }}
+              </div>
+            </div>
           </template>
         </el-table-column>
         <el-table-column prop="market_value" label="市值" width="120" align="right" sortable="custom">
@@ -129,9 +150,13 @@
 <script>
 import { getUserPositions } from '@/api/trading'
 import { ElMessage } from 'element-plus'
+import { Refresh } from '@element-plus/icons-vue'
 
 export default {
   name: 'StockPositions',
+  components: {
+    Refresh
+  },
   data() {
     return {
       loading: false,
@@ -141,6 +166,9 @@ export default {
       total: 0,
       sortField: '',
       sortOrder: '',
+      autoRefresh: false,
+      refreshTimer: null,
+      lastUpdateTime: null,
       positionStats: {
         total_positions: 0,
         total_market_value: 0,
@@ -151,6 +179,13 @@ export default {
   },
   mounted() {
     this.loadPositions()
+  },
+  beforeUnmount() {
+    // 清除定时器
+    if (this.refreshTimer) {
+      clearInterval(this.refreshTimer)
+      this.refreshTimer = null
+    }
   },
   methods: {
     async loadPositions() {
@@ -171,6 +206,7 @@ export default {
         if (response.data.code === 200) {
           this.positionList = response.data.data.list || []
           this.total = response.data.data.total || 0
+          this.lastUpdateTime = new Date()
           this.calculateStats()
         } else {
           ElMessage.error(response.data.msg || '加载持仓数据失败')
@@ -235,9 +271,42 @@ export default {
     goToStockDetail(tsCode) {
       this.$router.push(`/stock/detail/${tsCode}`)
     },
-    
+
     goToTrade(tsCode, type = 'buy') {
       this.$router.push(`/stock/trade/${tsCode}?type=${type}`)
+    },
+
+    formatUpdateTime() {
+      if (!this.lastUpdateTime) return ''
+      const now = new Date()
+      const diff = Math.floor((now - this.lastUpdateTime) / 1000)
+
+      if (diff < 60) return '刚刚更新'
+      if (diff < 3600) return `${Math.floor(diff / 60)}分钟前`
+
+      return this.lastUpdateTime.toLocaleTimeString('zh-CN', {
+        hour: '2-digit',
+        minute: '2-digit'
+      })
+    },
+
+    toggleAutoRefresh(enabled) {
+      if (enabled) {
+        // 开启自动刷新，每30秒刷新一次
+        this.refreshTimer = setInterval(() => {
+          if (!this.loading) {
+            this.loadPositions()
+          }
+        }, 30000)
+        ElMessage.success('已开启实时价格刷新')
+      } else {
+        // 关闭自动刷新
+        if (this.refreshTimer) {
+          clearInterval(this.refreshTimer)
+          this.refreshTimer = null
+        }
+        ElMessage.info('已关闭实时价格刷新')
+      }
     }
   }
 }
@@ -256,6 +325,32 @@ export default {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.price-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.price-update-time {
+  font-size: 11px;
+  color: #999;
+  margin-top: 2px;
+}
+
+.price-up {
+  color: #f56c6c;
+}
+
+.price-down {
+  color: #67c23a;
 }
 
 .empty-data {
