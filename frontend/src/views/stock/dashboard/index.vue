@@ -104,7 +104,7 @@
               class="watchlist-item"
               @click="goToStock(stock)"
             >
-              <div class="stock-name">{{ stock.name }}</div>
+              <div class="stock-name">{{ stock.name || stock.stock_name || stock.ts_code }}</div>
               <div class="stock-price">
                 <span :class="getPriceClass(stock.pct_chg)">
                   {{ stock.current_price }}
@@ -137,6 +137,7 @@
               </el-radio-group>
             </div>
           </template>
+          <!-- 大盘价格图 -->
           <v-chart
             class="market-chart"
             :option="marketChartOption"
@@ -242,7 +243,9 @@ import {
   TitleComponent,
   TooltipComponent,
   LegendComponent,
-  GridComponent
+  GridComponent,
+  DataZoomComponent,
+  ToolboxComponent
 } from "echarts/components"
 import VChart from "vue-echarts"
 import {
@@ -271,7 +274,9 @@ use([
   TitleComponent,
   TooltipComponent,
   LegendComponent,
-  GridComponent
+  GridComponent,
+  DataZoomComponent,
+  ToolboxComponent
 ])
 
 export default {
@@ -597,29 +602,51 @@ export default {
         tooltip: {
           trigger: 'axis',
           axisPointer: {
-            type: 'cross'
+            type: 'cross',
+            lineStyle: {
+              color: '#999',
+              width: 1,
+              type: 'solid'
+            }
           },
           backgroundColor: 'rgba(255, 255, 255, 0.95)',
           borderColor: '#ddd',
+          borderWidth: 1,
           textStyle: {
             color: '#333'
+          },
+          position: function (pt) {
+            return [pt[0], '10%']
           },
           formatter: function(params) {
             if (!params || params.length === 0) return ''
             const param = params[0]
             return `
-              <div style="padding: 8px;">
-                <div style="font-weight: bold; margin-bottom: 4px;">${param.name}</div>
-                <div>价格: <span style="color: #1890ff; font-weight: bold;">${param.value}</span></div>
+              <div style="padding: 10px; line-height: 1.5;">
+                <div style="font-weight: bold; margin-bottom: 8px; color: #333;">${title}</div>
+                <div style="margin-bottom: 4px;">时间: <span style="color: #666;">${param.name}</span></div>
+                <div style="margin-bottom: 4px;">价格: <span style="color: #1890ff; font-weight: bold;">${param.value}</span></div>
               </div>
             `
           }
         },
+        toolbox: {
+          feature: {
+            dataZoom: {
+              yAxisIndex: 'none'
+            },
+            restore: {},
+            saveAsImage: {}
+          },
+          right: 15,
+          top: 15
+        },
         grid: {
           left: '3%',
           right: '8%',
-          bottom: '10%',
-          top: '60px'
+          bottom: '15%',
+          top: '80px',
+          containLabel: true
         },
         xAxis: {
           type: 'category',
@@ -655,6 +682,30 @@ export default {
             }
           }
         },
+        dataZoom: [
+          {
+            type: 'inside',
+            start: 0,
+            end: 100
+          },
+          {
+            show: true,
+            type: 'slider',
+            bottom: 30,
+            start: 0,
+            end: 100,
+            height: 20,
+            fillerColor: 'rgba(24, 144, 255, 0.2)',
+            borderColor: '#d9d9d9',
+            handleStyle: {
+              color: '#fff',
+              borderColor: '#1890ff'
+            },
+            textStyle: {
+              color: '#666'
+            }
+          }
+        ],
         series: [
           {
             name: '分时价格',
@@ -662,6 +713,7 @@ export default {
             data: prices,
             smooth: true,
             symbol: 'none',
+            sampling: 'average',
             lineStyle: {
               color: '#1890ff',
               width: 2
@@ -849,19 +901,66 @@ export default {
 
         if (response.data.code === 200) {
           this.watchlist = response.data.data || []
+          console.log('Dashboard自选股数据:', this.watchlist)
         } else {
           console.error('获取自选股失败:', response.data.msg)
-          this.watchlist = []
+          // 回退到localStorage方式，但需要获取完整数据
+          await this.loadWatchlistFromLocal()
         }
       } catch (error) {
         console.error('获取自选股失败:', error)
-        // 回退到localStorage（兼容性）
-        const saved = localStorage.getItem('stock_watchlist')
-        if (saved) {
-          this.watchlist = JSON.parse(saved)
-        } else {
+        // 回退到localStorage方式，但需要获取完整数据
+        await this.loadWatchlistFromLocal()
+      }
+    },
+
+    async loadWatchlistFromLocal() {
+      try {
+        // 从localStorage获取股票代码列表
+        const savedCodes = JSON.parse(localStorage.getItem('watchlist_codes') || '[]')
+
+        if (savedCodes.length === 0) {
           this.watchlist = []
+          return
         }
+
+        // 获取完整的股票数据
+        const { getStockRealtime } = await import('@/api/stock')
+        const promises = savedCodes.map(async (code) => {
+          try {
+            const response = await getStockRealtime(code)
+            if (response.data.code === 200 && response.data.data) {
+              const stock = response.data.data
+              return {
+                ts_code: stock.ts_code,
+                name: stock.name || stock.stock_name || '未知股票',
+                stock_name: stock.name || stock.stock_name || '未知股票',
+                current_price: stock.current_price || stock.close || 0,
+                change: stock.change || 0,
+                pct_chg: stock.pct_chg || 0,
+                volume: stock.volume || stock.vol || 0,
+                amount: stock.amount || 0,
+                turnover_rate: stock.turnover_rate || 0,
+                pe_ratio: stock.pe_ratio || 0,
+                market_cap: stock.market_cap || 0
+              }
+            }
+            return null
+          } catch (error) {
+            console.error(`获取股票${code}数据失败:`, error)
+            return null
+          }
+        })
+
+        const results = await Promise.allSettled(promises)
+        this.watchlist = results
+          .filter(result => result.status === 'fulfilled' && result.value !== null)
+          .map(result => result.value)
+
+        console.log('从localStorage获取自选股:', this.watchlist)
+      } catch (error) {
+        console.error('从localStorage加载自选股失败:', error)
+        this.watchlist = []
       }
     },
     async refreshHotStocks() {

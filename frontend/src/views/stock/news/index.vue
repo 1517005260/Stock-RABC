@@ -4,10 +4,24 @@
       <template #header>
         <div class="card-header">
           <span>股票新闻</span>
-          <el-button type="primary" @click="refreshNews">
-            <el-icon><Refresh /></el-icon>
-            刷新
-          </el-button>
+          <div class="header-actions">
+            <!-- 管理员操作按钮 -->
+            <div v-if="isAdmin" class="admin-actions">
+              <el-button
+                type="success"
+                @click="fetchLatestNews"
+                :loading="fetchingNews"
+                size="small"
+              >
+                <el-icon><Download /></el-icon>
+                爬取最新新闻
+              </el-button>
+            </div>
+            <el-button type="primary" @click="refreshNews">
+              <el-icon><Refresh /></el-icon>
+              刷新
+            </el-button>
+          </div>
         </div>
       </template>
 
@@ -66,6 +80,18 @@
             </div>
           </div>
           <div class="news-actions">
+            <!-- 管理员删除按钮 -->
+            <el-button
+              v-if="isAdmin"
+              text
+              type="danger"
+              @click.stop="confirmDeleteNews(news)"
+              size="small"
+            >
+              <el-icon><Delete /></el-icon>
+              删除
+            </el-button>
+            <!-- 普通用户操作 -->
             <el-button text @click.stop="shareNews(news)">
               <el-icon><Share /></el-icon>
               分享
@@ -98,8 +124,9 @@
 </template>
 
 <script>
-import { Refresh, Search, Share, Star } from '@element-plus/icons-vue'
+import { Refresh, Search, Share, Star, Download, Delete } from '@element-plus/icons-vue'
 import { getLatestNews } from '@/api/stock'
+import { fetchLatestNews as fetchNewsAPI, deleteNews as deleteNewsAPI } from '@/api/trading'
 
 export default {
   name: 'StockNews',
@@ -107,11 +134,14 @@ export default {
     Refresh,
     Search,
     Share,
-    Star
+    Star,
+    Download,
+    Delete
   },
   data() {
     return {
       loading: false,
+      fetchingNews: false,
       searchKeyword: '',
       selectedCategory: '',
       dateRange: null,
@@ -119,6 +149,14 @@ export default {
       currentPage: 1,
       pageSize: 20,
       total: 0
+    }
+  },
+  computed: {
+    // 检查是否是管理员
+    isAdmin() {
+      const currentUser = JSON.parse(sessionStorage.getItem('currentUser') || '{}')
+      const userRoles = currentUser.roles || ''
+      return userRoles.includes('超级管理员') || userRoles.includes('管理员')
     }
   },
   async created() {
@@ -221,7 +259,7 @@ export default {
       const date = new Date(timeStr)
       const now = new Date()
       const diff = now - date
-      
+
       if (diff < 60000) { // 小于1分钟
         return '刚刚'
       } else if (diff < 3600000) { // 小于1小时
@@ -230,6 +268,79 @@ export default {
         return Math.floor(diff / 3600000) + '小时前'
       } else {
         return timeStr.substring(5, 16) // MM-DD HH:mm
+      }
+    },
+
+    // 管理员功能方法
+
+    // 爬取最新新闻
+    async fetchLatestNews() {
+      if (!this.isAdmin) {
+        this.$message.error('权限不足')
+        return
+      }
+
+      this.fetchingNews = true
+      try {
+        const response = await fetchNewsAPI({
+          limit: 20
+        })
+
+        if (response.data.code === 200) {
+          const savedCount = response.data.data?.saved_count || 0
+          this.$message.success(response.data.msg || `成功爬取并保存了 ${savedCount} 条新闻`)
+
+          // 刷新新闻列表
+          await this.loadNews()
+        } else {
+          this.$message.warning(response.data.msg || '爬取新闻失败')
+        }
+      } catch (error) {
+        console.error('爬取新闻失败:', error)
+        this.$message.error('爬取新闻失败，请检查网络连接')
+      } finally {
+        this.fetchingNews = false
+      }
+    },
+
+    // 确认删除新闻
+    confirmDeleteNews(news) {
+      if (!this.isAdmin) {
+        this.$message.error('权限不足')
+        return
+      }
+
+      this.$confirm(
+        `确定要删除新闻"${news.title}"吗？删除后无法恢复。`,
+        '删除确认',
+        {
+          confirmButtonText: '确定删除',
+          cancelButtonText: '取消',
+          type: 'warning',
+          dangerouslyUseHTMLString: true
+        }
+      ).then(async () => {
+        await this.deleteNews(news.id)
+      }).catch(() => {
+        // 用户取消删除
+      })
+    },
+
+    // 删除新闻
+    async deleteNews(newsId) {
+      try {
+        const response = await deleteNewsAPI(newsId)
+
+        if (response.data.code === 200) {
+          this.$message.success('新闻删除成功')
+          // 刷新新闻列表
+          await this.loadNews()
+        } else {
+          this.$message.error(response.data.msg || '删除新闻失败')
+        }
+      } catch (error) {
+        console.error('删除新闻失败:', error)
+        this.$message.error('删除新闻失败，请检查网络连接')
       }
     }
   }
@@ -245,6 +356,18 @@ export default {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.admin-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .search-bar {

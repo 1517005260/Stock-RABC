@@ -486,7 +486,7 @@ export default {
       
       // 验证数据结构
       if (!Array.isArray(time) || !Array.isArray(price) || time.length === 0 || price.length === 0) {
-        // 按照sample项目的方式处理空数据情况
+        // 处理空数据情况
         const emptyOption = {
           title: {
             text: '暂无分时数据',

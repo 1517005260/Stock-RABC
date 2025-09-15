@@ -35,6 +35,7 @@ urlpatterns = [
     # 管理员功能 - 新闻管理
     path('admin/news/', views.admin_news_list, name='admin_news_list'),             # GET 管理员获取新闻列表
     path('admin/news/create/', views.admin_create_news, name='admin_create_news'),  # POST 管理员创建新闻
+    path('admin/news/fetch/', views.admin_fetch_news, name='admin_fetch_news'),     # POST 管理员爬取新闻
     path('admin/news/<int:news_id>/update/', views.admin_update_news, name='admin_update_news'), # PUT 管理员更新新闻
     path('admin/news/<int:news_id>/delete/', views.admin_delete_news, name='admin_delete_news'), # DELETE 管理员删除新闻
     

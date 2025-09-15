@@ -119,6 +119,7 @@ class MarketNews(models.Model):
     title = models.CharField(max_length=200, verbose_name='新闻标题')
     content = models.TextField(verbose_name='新闻内容')
     source = models.CharField(max_length=50, null=True, blank=True, verbose_name='新闻来源')
+    source_url = models.URLField(max_length=500, null=True, blank=True, verbose_name='新闻原文链接')
     publish_time = models.DateTimeField(verbose_name='发布时间')
     read_count = models.IntegerField(default=0, verbose_name='阅读次数')
     category = models.CharField(max_length=20, null=True, blank=True, verbose_name='新闻分类')
@@ -149,6 +150,7 @@ class AdminOperationLog(models.Model):
         ('NEWS_CREATE', '创建新闻'),
         ('NEWS_UPDATE', '更新新闻'),
         ('NEWS_DELETE', '删除新闻'),
+        ('NEWS_FETCH', '爬取新闻'),
         ('USER_MANAGE', '用户管理'),
         ('TRADE_MANAGE', '交易管理'),
         ('DATA_SYNC', '数据同步'),

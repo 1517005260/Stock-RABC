@@ -56,7 +56,7 @@
           <el-table-column prop="name" label="股票名称" width="120">
             <template #default="scope">
               <div class="stock-name">
-                <strong>{{ scope.row.name }}</strong>
+                <strong>{{ scope.row.name || scope.row.stock_name || scope.row.ts_code }}</strong>
                 <div class="stock-code">{{ scope.row.ts_code }}</div>
               </div>
             </template>
@@ -94,13 +94,13 @@
 
           <el-table-column prop="turnover_rate" label="换手率" width="100" align="right">
             <template #default="scope">
-              {{ formatPercent(scope.row.turnover_rate) }}
+              {{ scope.row.turnover_rate && scope.row.turnover_rate > 0 ? scope.row.turnover_rate.toFixed(2) + '%' : '--' }}
             </template>
           </el-table-column>
 
           <el-table-column prop="pe_ratio" label="市盈率" width="100" align="right">
             <template #default="scope">
-              {{ scope.row.pe_ratio ? scope.row.pe_ratio.toFixed(2) : '--' }}
+              {{ scope.row.pe_ratio && scope.row.pe_ratio > 0 ? scope.row.pe_ratio.toFixed(2) : '--' }}
             </template>
           </el-table-column>
 
@@ -266,7 +266,14 @@ export default {
 
             this.watchlist = results
               .filter(result => result.status === 'fulfilled' && result.value)
-              .map(result => result.value)
+              .map(result => {
+                const stock = result.value
+                return {
+                  ...stock,
+                  name: stock.name || stock.stock_name || '未知股票',
+                  stock_name: stock.name || stock.stock_name || '未知股票'
+                }
+              })
 
             console.log('从localStorage获取自选股:', this.watchlist)
           }
@@ -346,11 +353,16 @@ export default {
           // API添加成功后更新前端列表
           this.watchlist.unshift({
             ts_code: stock.ts_code,
-            stock_name: stock.name,
-            name: stock.name,
-            current_price: stock.current_price || stock.close,
-            change: stock.change,
-            pct_chg: stock.pct_chg
+            stock_name: stock.name || stock.stock_name || '未知股票',
+            name: stock.name || stock.stock_name || '未知股票',
+            current_price: stock.current_price || stock.close || 0,
+            change: stock.change || 0,
+            pct_chg: stock.pct_chg || 0,
+            volume: stock.volume || stock.vol || 0,
+            amount: stock.amount || 0,
+            turnover_rate: stock.turnover_rate || 0,
+            pe_ratio: stock.pe_ratio || 0,
+            market_cap: stock.market_cap || 0
           })
 
           this.$message.success(`已添加 ${stock.name} 到自选股`)
@@ -363,7 +375,19 @@ export default {
         console.error('添加自选股失败:', error)
 
         // API失败时回退到localStorage
-        this.watchlist.unshift(stock)
+        this.watchlist.unshift({
+          ts_code: stock.ts_code,
+          stock_name: stock.name || stock.stock_name || '未知股票',
+          name: stock.name || stock.stock_name || '未知股票',
+          current_price: stock.current_price || stock.close || 0,
+          change: stock.change || 0,
+          pct_chg: stock.pct_chg || 0,
+          volume: stock.volume || stock.vol || 0,
+          amount: stock.amount || 0,
+          turnover_rate: stock.turnover_rate || 0,
+          pe_ratio: stock.pe_ratio || 0,
+          market_cap: stock.market_cap || 0
+        })
         const codes = this.watchlist.map(item => item.ts_code)
         localStorage.setItem('watchlist_codes', JSON.stringify(codes))
 
@@ -426,30 +450,30 @@ export default {
       return pctChg > 0 ? 'price-up' : pctChg < 0 ? 'price-down' : ''
     },
     formatPrice(price) {
-      if (!price) return '--'
+      if (!price || price === 0) return '--'
       return parseFloat(price).toFixed(2)
     },
     formatChange(value) {
-      if (!value) return '--'
+      if (!value || value === 0) return '--'
       const formatted = parseFloat(value).toFixed(2)
       return value > 0 ? `+${formatted}` : formatted
     },
     formatPercent(value) {
-      if (!value) return '--'
+      if (!value || value === 0) return '--'
       const formatted = parseFloat(value).toFixed(2)
       return value > 0 ? `+${formatted}%` : `${formatted}%`
     },
     formatVolume(volume) {
-      if (!volume) return '--'
+      if (!volume || volume === 0) return '--'
       if (volume >= 100000000) {
-        return (volume / 100000000).toFixed(2) + '亿'
+        return (volume / 100000000).toFixed(2) + '亿手'
       } else if (volume >= 10000) {
-        return (volume / 10000).toFixed(0) + '万'
+        return (volume / 10000).toFixed(0) + '万手'
       }
-      return volume.toLocaleString()
+      return volume.toLocaleString() + '手'
     },
     formatMarketCap(marketCap) {
-      if (!marketCap) return '--'
+      if (!marketCap || marketCap === 0) return '--'
       if (marketCap >= 1000000000000) {
         return (marketCap / 1000000000000).toFixed(2) + '万亿'
       } else if (marketCap >= 100000000) {

@@ -461,12 +461,14 @@ export default {
   methods: {
     async getStockDetail() {
       if (!this.tsCode) return
-      
+
       this.loading = true
       try {
         const response = await getStockDetail(this.tsCode)
         if (response.data.code === 200) {
           this.stockDetail = response.data.data
+          // 获取实时价格更新显示
+          await this.updateRealtimePrice()
         } else {
           this.$message.error(response.data.msg || '获取股票详情失败')
         }
@@ -475,6 +477,36 @@ export default {
         this.$message.error('获取股票详情失败')
       } finally {
         this.loading = false
+      }
+    },
+
+    async updateRealtimePrice() {
+      try {
+        const { getStockIntradayChart } = await import('@/api/stock')
+        const response = await getStockIntradayChart(this.tsCode)
+
+        if (response.data.code === 200 && response.data.data && this.stockDetail) {
+          const chartData = response.data.data
+          // 取最新的分时数据作为当前价格
+          if (chartData.price && Array.isArray(chartData.price) && chartData.price.length > 0) {
+            const newPrice = parseFloat(chartData.price[chartData.price.length - 1])
+
+            // 更新当前价格
+            this.stockDetail.current_price = newPrice
+
+            // 计算涨跌幅
+            if (this.stockDetail.pre_close) {
+              const preClose = parseFloat(this.stockDetail.pre_close)
+              this.stockDetail.change = newPrice - preClose
+              this.stockDetail.pct_chg = ((newPrice - preClose) / preClose * 100)
+            }
+
+            console.log(`详情页价格已更新: ${newPrice}`)
+          }
+        }
+      } catch (error) {
+        console.error('获取实时价格失败:', error)
+        // 不显示错误消息，因为这是辅助功能
       }
     },
     
@@ -638,27 +670,72 @@ export default {
       this.watchlistLoading = true
 
       try {
-        const savedCodes = JSON.parse(localStorage.getItem('watchlist_codes') || '[]')
-
         if (this.isInWatchlist) {
           // 从自选中移除
-          const index = savedCodes.indexOf(this.tsCode)
-          if (index > -1) {
-            savedCodes.splice(index, 1)
-            localStorage.setItem('watchlist_codes', JSON.stringify(savedCodes))
+          const { removeFromWatchList } = await import('@/api/trading')
+          const response = await removeFromWatchList(this.tsCode)
+
+          if (response.data.code === 200) {
             this.isInWatchlist = false
             this.$message.success(`已将 ${this.stockDetail.name} 从自选股中移除`)
+
+            // 同步更新localStorage（兼容性处理）
+            const savedCodes = JSON.parse(localStorage.getItem('watchlist_codes') || '[]')
+            const index = savedCodes.indexOf(this.tsCode)
+            if (index > -1) {
+              savedCodes.splice(index, 1)
+              localStorage.setItem('watchlist_codes', JSON.stringify(savedCodes))
+            }
+          } else {
+            throw new Error(response.data.msg || '移除失败')
           }
         } else {
           // 添加到自选
-          savedCodes.unshift(this.tsCode)
-          localStorage.setItem('watchlist_codes', JSON.stringify(savedCodes))
-          this.isInWatchlist = true
-          this.$message.success(`已将 ${this.stockDetail.name} 添加到自选股`)
+          const { addToWatchList } = await import('@/api/trading')
+          const response = await addToWatchList({
+            ts_code: this.tsCode
+          })
+
+          if (response.data.code === 200) {
+            this.isInWatchlist = true
+            this.$message.success(`已将 ${this.stockDetail.name} 添加到自选股`)
+
+            // 同步更新localStorage（兼容性处理）
+            const savedCodes = JSON.parse(localStorage.getItem('watchlist_codes') || '[]')
+            if (!savedCodes.includes(this.tsCode)) {
+              savedCodes.unshift(this.tsCode)
+              localStorage.setItem('watchlist_codes', JSON.stringify(savedCodes))
+            }
+          } else {
+            throw new Error(response.data.msg || '添加失败')
+          }
         }
       } catch (error) {
         console.error('操作自选股失败:', error)
-        this.$message.error('操作失败，请重试')
+        this.$message.error(`操作失败: ${error.message}`)
+
+        // API失败时回退到localStorage模式
+        try {
+          const savedCodes = JSON.parse(localStorage.getItem('watchlist_codes') || '[]')
+
+          if (this.isInWatchlist) {
+            const index = savedCodes.indexOf(this.tsCode)
+            if (index > -1) {
+              savedCodes.splice(index, 1)
+              localStorage.setItem('watchlist_codes', JSON.stringify(savedCodes))
+              this.isInWatchlist = false
+              this.$message.success(`已将 ${this.stockDetail.name} 从自选股中移除 (本地模式)`)
+            }
+          } else {
+            savedCodes.unshift(this.tsCode)
+            localStorage.setItem('watchlist_codes', JSON.stringify(savedCodes))
+            this.isInWatchlist = true
+            this.$message.success(`已将 ${this.stockDetail.name} 添加到自选股 (本地模式)`)
+          }
+        } catch (fallbackError) {
+          console.error('localStorage回退也失败:', fallbackError)
+          this.$message.error('操作失败，请重试')
+        }
       } finally {
         this.watchlistLoading = false
       }

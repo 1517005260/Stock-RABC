@@ -300,7 +300,7 @@ def stock_hot_list(request):
 
         print(f"获取涨幅榜前{limit}只股票")
 
-        # 参考sample项目策略：优先从TuShare API实时获取涨幅榜
+        # 优先从TuShare API实时获取涨幅榜
         use_realtime_api = True
         hot_stocks = []
 
@@ -308,7 +308,6 @@ def stock_hot_list(request):
             try:
                 print("尝试从TuShare API获取实时涨幅榜...")
 
-                # 使用sample项目中的get_top_gainers方法
                 from stock.tushare_service import enterprise_finance_service
 
                 gainers = enterprise_finance_service.get_top_gainers(limit * 2)  # 获取2倍数量，筛选后返回
@@ -651,7 +650,7 @@ def market_overview(request):
 
 @require_login
 def stock_kline_data(request, ts_code):
-    """获取K线图数据 - 参考sample项目，实时获取最新数据，确保ECharts兼容性"""
+    """获取K线图数据，实时获取最新数据，确保ECharts兼容性"""
     try:
         from datetime import datetime, timedelta
         from chinese_calendar import is_workday, is_holiday
@@ -687,14 +686,14 @@ def stock_kline_data(request, ts_code):
         is_index = ts_code in ['000001.SH', '399001.SZ', '399006.SZ', '000300.SH', '000905.SH']
 
         if is_index:
-            # 指数数据直接从Tushare获取 - 参考sample项目做法
+            # 指数数据直接从Tushare获取
             if not pro:
                 return JsonResponse({
                     'code': 500,
                     'msg': 'Tushare API未配置，无法获取指数数据'
                 })
 
-            # 参考sample项目：直接从API获取最新数据
+            # 直接从API获取最新数据
             try:
                 # 计算日期范围 - 确保获取足够的数据
                 end_date = datetime.now().strftime('%Y%m%d')
@@ -798,7 +797,7 @@ def stock_kline_data(request, ts_code):
                     'msg': f'获取指数数据失败: {str(e)}'
                 })
         else:
-                # 股票数据 - 参考sample项目策略：优先使用实时API，回退到本地数据
+                # 股票数据 优先使用实时API，回退到本地数据
             stock_name = ts_code
             kline_data = []
 
@@ -824,7 +823,7 @@ def stock_kline_data(request, ts_code):
                         'msg': f'股票不存在且同步失败: {sync_result["message"]}'
                     })
 
-            # 参考sample项目：优先从TuShare API实时获取数据
+            # 优先从TuShare API实时获取数据
             use_realtime_api = True
             if use_realtime_api and pro:
                 try:
@@ -1004,7 +1003,7 @@ def stock_kline_data(request, ts_code):
             'ma5': technical_indicators.get('ma5', []),
             'ma10': technical_indicators.get('ma10', []),
             'ma20': technical_indicators.get('ma20', []),
-            'ma30': technical_indicators.get('ma60', [])  # 使用ma60作为ma30的替代
+            'ma30': technical_indicators.get('ma30', [])  # 修复：使用正确的ma30
         }
 
         # 保持原有的ECharts格式用于其他用途

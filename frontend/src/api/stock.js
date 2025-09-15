@@ -51,7 +51,7 @@ export function getStockRealtimeData(tsCode) {
   })
 }
 
-// 获取实时数据（新增的兼容函数）
+// 获取实时数据（兼容函数）
 export function getRealtimeData(tsCode) {
   return request({
     url: `/stock/realtime/data/${tsCode}/`,

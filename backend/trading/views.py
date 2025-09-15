@@ -7,6 +7,7 @@ from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
 from django.core.paginator import Paginator
 from django.db.models import Q
+from django.utils import timezone
 
 from trading.models import (UserStockAccount, UserPosition, TradeRecord, UserWatchList, MarketNews, AdminOperationLog,
                           UserStockAccountSerializer, UserPositionSerializer, TradeRecordSerializer, 
@@ -144,7 +145,7 @@ def buy_stock(request):
             position.current_price = Decimal(str(price))
             position.save()
             
-            # 记录交易历史
+            # 记录交易历史 - 模拟股票交易，这里直接成交
             TradeRecord.objects.create(
                 user=user,
                 ts_code=ts_code,
@@ -154,7 +155,8 @@ def buy_stock(request):
                 trade_shares=shares,
                 trade_amount=Decimal(str(trade_amount)),
                 commission=Decimal('5.00'),  # 固定手续费
-                status='COMPLETED'
+                status='COMPLETED',  # 直接成交，无委托状态
+                trade_time=timezone.now()  # 使用Django的timezone来确保时区正确
             )
             
             return JsonResponse({
@@ -199,7 +201,8 @@ def sell_stock(request):
         # 交易时间检查
         if not _is_trading_time():
             return JsonResponse({
-                'code': 400,
+                'flag': 0,
+                'money': 1,
                 'msg': '当前非交易时间！交易时间：工作日 9:30-11:30, 13:00-15:00'
             })
 
@@ -215,22 +218,25 @@ def sell_stock(request):
         # 参数验证
         if not all([ts_code, price, shares]):
             return JsonResponse({
-                'code': 400,
+                'flag': 0,
+                'money': 0,
                 'msg': '参数不完整，请提供股票代码、价格和数量'
             })
-        
+
         try:
             price = float(price)
             shares = int(shares)
         except (ValueError, TypeError):
             return JsonResponse({
-                'code': 400,
+                'flag': 0,
+                'money': 0,
                 'msg': '价格和数量格式错误'
             })
-        
+
         if price <= 0 or shares <= 0:
             return JsonResponse({
-                'code': 400,
+                'flag': 0,
+                'money': 0,
                 'msg': '价格和数量必须大于0'
             })
         
@@ -239,7 +245,8 @@ def sell_stock(request):
         
         if result['success']:
             return JsonResponse({
-                'code': 200,
+                'flag': 1,
+                'money': 1,
                 'msg': result['message'],
                 'data': {
                     'net_amount': float(result['net_amount']),
@@ -248,18 +255,21 @@ def sell_stock(request):
             })
         else:
             return JsonResponse({
-                'code': 400,
+                'flag': 0,
+                'money': 0,
                 'msg': result['message']
             })
         
     except SysUser.DoesNotExist:
         return JsonResponse({
-            'code': 404,
+            'flag': 0,
+            'money': 0,
             'msg': '用户不存在'
         })
     except Exception as e:
         return JsonResponse({
-            'code': 500,
+            'flag': 0,
+            'money': 0,
             'msg': f'卖出失败: {str(e)}'
         })
 
@@ -388,7 +398,8 @@ def get_trade_records(request):
     try:
         page = int(request.GET.get('page', 1))
         page_size = int(request.GET.get('pageSize', 20))
-        
+        ts_code = request.GET.get('ts_code', '').strip()  # 按股票代码筛选
+
         # 根据数据权限过滤
         if request.data_scope == 'self':
             # 普通用户只能看自己的
@@ -411,14 +422,20 @@ def get_trade_records(request):
                 queryset = TradeRecord.objects.filter(user_id=user_id)
             else:
                 queryset = TradeRecord.objects.all()
-        
+
+        # 按股票代码筛选
+        if ts_code:
+            queryset = queryset.filter(ts_code=ts_code)
+
         # 分页
         paginator = Paginator(queryset.order_by('-trade_time'), page_size)
         trades = paginator.get_page(page)
-        
+
         # 序列化数据
         trade_list = []
         for trade in trades:
+            # 确保时间格式化使用本地时区
+            local_time = timezone.localtime(trade.trade_time)
             trade_data = {
                 'id': trade.id,
                 'user_id': trade.user.id,
@@ -426,18 +443,21 @@ def get_trade_records(request):
                 'ts_code': trade.ts_code,
                 'stock_name': trade.stock_name,
                 'trade_type': trade.trade_type,
-                'trade_type_display': trade.get_trade_type_display(),
                 'trade_price': float(trade.trade_price),
                 'trade_shares': trade.trade_shares,
                 'trade_amount': float(trade.trade_amount),
                 'commission': float(trade.commission),
-                'trade_time': trade.trade_time.strftime('%Y-%m-%d %H:%M:%S'),
                 'status': trade.status,
-                'status_display': trade.get_status_display(),
-                'remark': trade.remark,
+                'trade_time': local_time.strftime('%Y-%m-%d %H:%M:%S'),
+                # 前端显示用字段
+                'time': local_time.strftime('%H:%M:%S'),
+                'type': trade.trade_type.lower(),
+                'price': float(trade.trade_price),
+                'quantity': trade.trade_shares // 100,  # 转换为手数
+                'amount': float(trade.trade_amount),
             }
             trade_list.append(trade_data)
-        
+
         return JsonResponse({
             'code': 200,
             'msg': '获取成功',
@@ -449,7 +469,7 @@ def get_trade_records(request):
                 'totalPages': paginator.num_pages,
             }
         })
-        
+
     except Exception as e:
         return JsonResponse({
             'code': 500,
@@ -514,28 +534,46 @@ def get_watchlist(request):
     try:
         user = SysUser.objects.get(id=request.user_id)
         watchlist = UserWatchList.objects.filter(user=user).order_by('-add_time')
-        
+
         result = []
         for item in watchlist:
             # 获取最新行情
             latest_daily = StockDaily.objects.filter(ts_code=item.ts_code).order_by('-trade_date').first()
-            
+
+            # 获取股票基础信息，用于计算市值等指标
+            try:
+                stock_basic = StockBasic.objects.get(ts_code=item.ts_code)
+            except StockBasic.DoesNotExist:
+                stock_basic = None
+
             watch_data = {
                 'ts_code': item.ts_code,
                 'stock_name': item.stock_name,
+                'name': item.stock_name,  # 前端兼容字段
                 'add_time': item.add_time.strftime('%Y-%m-%d %H:%M:%S'),
                 'current_price': float(latest_daily.close) if latest_daily and latest_daily.close else None,
                 'change': float(latest_daily.change) if latest_daily and latest_daily.change else None,
                 'pct_chg': float(latest_daily.pct_chg) if latest_daily and latest_daily.pct_chg else None,
+                # 只返回真实存在的字段，不模拟任何数据
+                'volume': latest_daily.vol if latest_daily else None,
+                'amount': float(latest_daily.amount) if latest_daily and latest_daily.amount else None,
+                'turnover_rate': None,  # 不模拟，显示 "--"
+                'pe_ratio': None,       # 不模拟，显示 "--"
+                'market_cap': None,     # 不模拟，显示 "--"
+                'trade_date': latest_daily.trade_date.strftime('%Y-%m-%d') if latest_daily else None,
+                'open': float(latest_daily.open) if latest_daily and latest_daily.open else None,
+                'high': float(latest_daily.high) if latest_daily and latest_daily.high else None,
+                'low': float(latest_daily.low) if latest_daily and latest_daily.low else None,
+                'pre_close': float(latest_daily.pre_close) if latest_daily and latest_daily.pre_close else None,
             }
             result.append(watch_data)
-        
+
         return JsonResponse({
             'code': 200,
             'msg': '获取成功',
             'data': result
         })
-        
+
     except Exception as e:
         return JsonResponse({
             'code': 500,
@@ -1168,6 +1206,7 @@ def get_news_detail(request, news_id):
                 'title': news.title,
                 'content': news.content,
                 'source': news.source,
+                'source_url': getattr(news, 'source_url', ''),
                 'category': news.category,
                 'related_stocks': news.related_stocks,
                 'publish_time': news.publish_time.strftime('%Y-%m-%d %H:%M:%S'),
@@ -1190,4 +1229,46 @@ def get_news_detail(request, news_id):
         return JsonResponse({
             'code': 500,
             'msg': f'获取新闻详情失败: {str(e)}'
+        })
+
+
+@admin_required
+@csrf_exempt
+@require_http_methods(["POST"])
+def admin_fetch_news(request):
+    """管理员爬取最新新闻 - 仅管理员可访问"""
+    try:
+        from stock.services import NewsService
+
+        admin_user = SysUser.objects.get(id=request.user_id)
+        data = json.loads(request.body) if request.body else {}
+        limit = data.get('limit', 20)
+
+        # 记录操作日志
+        AdminService.log_operation(
+            admin_user=admin_user,
+            operation_type='NEWS_FETCH',
+            operation_desc=f"爬取最新新闻，限制数量：{limit}"
+        )
+
+        # 爬取新闻
+        saved_count = NewsService.update_news_data(limit=limit)
+
+        if saved_count > 0:
+            return JsonResponse({
+                'code': 200,
+                'msg': f'成功爬取并保存了 {saved_count} 条新闻',
+                'data': {'saved_count': saved_count}
+            })
+        else:
+            return JsonResponse({
+                'code': 200,
+                'msg': '未发现新的新闻或爬取失败',
+                'data': {'saved_count': 0}
+            })
+
+    except Exception as e:
+        return JsonResponse({
+            'code': 500,
+            'msg': f'爬取新闻失败: {str(e)}'
         })

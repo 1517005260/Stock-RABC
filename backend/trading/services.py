@@ -189,7 +189,8 @@ class TradingService:
                 trade_shares=shares,
                 trade_amount=trade_amount,
                 commission=commission,
-                status='COMPLETED'
+                status='COMPLETED',
+                trade_time=timezone.now()
             )
             
             # 更新总资产
@@ -254,7 +255,8 @@ class TradingService:
                 trade_shares=shares,
                 trade_amount=trade_amount,
                 commission=commission,
-                status='COMPLETED'
+                status='COMPLETED',
+                trade_time=timezone.now()
             )
             
             # 更新总资产
@@ -400,22 +402,23 @@ class AdminService:
     
     @staticmethod
     @transaction.atomic
-    def create_news(admin_user: SysUser, title: str, content: str, 
-                   source: str = None, category: str = None, 
-                   related_stocks: List[str] = None) -> Tuple[bool, str, MarketNews]:
+    def create_news(admin_user: SysUser, title: str, content: str,
+                   source: str = None, category: str = None,
+                   source_url: str = None, related_stocks: List[str] = None) -> Tuple[bool, str, MarketNews]:
         """创建新闻"""
         try:
             news = MarketNews.objects.create(
                 title=title,
                 content=content,
                 source=source,
+                source_url=source_url,
                 category=category,
                 related_stocks=related_stocks,
                 publish_time=timezone.now(),
                 created_by=admin_user,
                 is_published=True
             )
-            
+
             # 记录操作日志
             AdminService.log_operation(
                 admin_user=admin_user,
@@ -423,9 +426,9 @@ class AdminService:
                 operation_desc=f"创建新闻: {title}",
                 target_object=f"news_id:{news.id}"
             )
-            
+
             return True, "新闻创建成功", news
-            
+
         except Exception as e:
             return False, f"新闻创建失败: {str(e)}", None
     
@@ -609,30 +612,120 @@ class WatchListService:
     
     @staticmethod
     def get_user_watchlist(user: SysUser) -> List[Dict]:
-        """获取用户自选股列表"""
+        """获取用户自选股列表 - 包含完整的股票数据"""
         watchlist = UserWatchList.objects.filter(user=user).order_by('-add_time')
-        
+
         result = []
         for item in watchlist:
-            # 获取最新价格信息
             try:
+                # 获取最新价格信息
                 latest_data = StockDaily.objects.filter(
                     ts_code=item.ts_code
                 ).order_by('-trade_date').first()
-                
-                current_price = latest_data.close if latest_data else 0
-                change = latest_data.change if latest_data else 0
-                pct_chg = latest_data.pct_chg if latest_data else 0
-            except:
-                current_price = change = pct_chg = 0
-            
-            result.append({
-                'ts_code': item.ts_code,
-                'stock_name': item.stock_name,
-                'add_time': item.add_time,
-                'current_price': current_price,
-                'change': change,
-                'pct_chg': pct_chg
-            })
-        
+
+                # 获取股票基本信息
+                try:
+                    stock_basic = StockBasic.objects.get(ts_code=item.ts_code)
+                    stock_name = stock_basic.name
+                    industry = stock_basic.industry or '未分类'
+                    market = stock_basic.market or '主板'
+                except StockBasic.DoesNotExist:
+                    stock_name = item.stock_name
+                    industry = '未分类'
+                    market = '未知'
+
+                if latest_data:
+                    # 计算市值和换手率，添加数据验证
+                    circ_mv = float(latest_data.circ_mv) if latest_data.circ_mv else 0  # 流通市值(万元)
+                    total_mv = float(latest_data.total_mv) if latest_data.total_mv else 0  # 总市值(万元)
+                    turnover_rate = float(latest_data.turnover_rate) if latest_data.turnover_rate else 0
+                    pe_ratio = float(latest_data.pe) if latest_data.pe else 0
+
+                    # 成交量处理：vol字段在Tushare中单位是手，需要转换
+                    volume = int(latest_data.vol) if latest_data.vol else 0  # 成交量(手)
+                    # 成交额处理：amount字段在Tushare中单位是千元
+                    amount = float(latest_data.amount) if latest_data.amount else 0  # 成交额(千元)
+
+                    # 特殊处理：对于北交所等特殊市场的股票，如果数据为0，尝试估算
+                    if item.ts_code.endswith('.BJ') and (volume == 0 or turnover_rate == 0):
+                        # 北交所股票的数据可能不完整，提供合理的默认值
+                        if volume == 0 and amount > 0:
+                            # 基于成交额和当前价格估算成交量
+                            current_price = float(latest_data.close) if latest_data.close else 1
+                            volume = int(amount * 1000 / current_price / 100) if current_price > 0 else 0
+
+                        if turnover_rate == 0 and circ_mv > 0 and amount > 0:
+                            # 估算换手率 = 成交额 / 流通市值
+                            turnover_rate = round((amount * 1000) / (circ_mv * 10000) * 100, 2) if circ_mv > 0 else 0
+
+                    result.append({
+                        'ts_code': item.ts_code,
+                        'name': stock_name,
+                        'stock_name': stock_name,
+                        'add_time': item.add_time,
+                        'current_price': float(latest_data.close) if latest_data.close else 0,
+                        'change': float(latest_data.change) if latest_data.change else 0,
+                        'pct_chg': float(latest_data.pct_chg) if latest_data.pct_chg else 0,
+                        'volume': volume,  # 成交量(手)
+                        'amount': amount,  # 成交额(千元)
+                        'turnover_rate': turnover_rate,  # 换手率(%)
+                        'pe_ratio': pe_ratio,  # 市盈率
+                        'market_cap': total_mv * 10000 if total_mv else 0,  # 总市值(元)
+                        'circ_market_cap': circ_mv * 10000 if circ_mv else 0,  # 流通市值(元)
+                        'industry': industry,
+                        'market': market,
+                        'trade_date': latest_data.trade_date.strftime('%Y-%m-%d') if latest_data.trade_date else None,
+                        'open': float(latest_data.open) if latest_data.open else 0,
+                        'high': float(latest_data.high) if latest_data.high else 0,
+                        'low': float(latest_data.low) if latest_data.low else 0,
+                    })
+                else:
+                    # 没有交易数据的情况
+                    result.append({
+                        'ts_code': item.ts_code,
+                        'name': stock_name,
+                        'stock_name': stock_name,
+                        'add_time': item.add_time,
+                        'current_price': 0,
+                        'change': 0,
+                        'pct_chg': 0,
+                        'volume': 0,
+                        'amount': 0,
+                        'turnover_rate': 0,
+                        'pe_ratio': 0,
+                        'market_cap': 0,
+                        'circ_market_cap': 0,
+                        'industry': industry,
+                        'market': market,
+                        'trade_date': None,
+                        'open': 0,
+                        'high': 0,
+                        'low': 0,
+                    })
+
+            except Exception as e:
+                print(f"获取自选股 {item.ts_code} 数据失败: {e}")
+                # 即使出错也要返回基本信息
+                result.append({
+                    'ts_code': item.ts_code,
+                    'name': item.stock_name,
+                    'stock_name': item.stock_name,
+                    'add_time': item.add_time,
+                    'current_price': 0,
+                    'change': 0,
+                    'pct_chg': 0,
+                    'volume': 0,
+                    'amount': 0,
+                    'turnover_rate': 0,
+                    'pe_ratio': 0,
+                    'market_cap': 0,
+                    'circ_market_cap': 0,
+                    'industry': '未分类',
+                    'market': '未知',
+                    'trade_date': None,
+                    'open': 0,
+                    'high': 0,
+                    'low': 0,
+                })
+
         return result

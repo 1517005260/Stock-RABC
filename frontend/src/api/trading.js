@@ -127,3 +127,68 @@ export function toggleUserTradingStatus(data) {
     data
   })
 }
+
+// 新闻相关接口
+
+// 获取新闻列表
+export function getNewsList(params) {
+  return request({
+    url: '/trading/news/',
+    method: 'get',
+    params
+  })
+}
+
+// 获取新闻详情
+export function getNewsDetail(newsId) {
+  return request({
+    url: `/trading/news/${newsId}/`,
+    method: 'get'
+  })
+}
+
+// 管理员新闻管理
+
+// 爬取最新新闻（管理员）
+export function fetchLatestNews(data) {
+  return request({
+    url: '/trading/admin/news/fetch/',
+    method: 'post',
+    data
+  })
+}
+
+// 删除新闻（管理员）
+export function deleteNews(newsId) {
+  return request({
+    url: `/trading/admin/news/${newsId}/delete/`,
+    method: 'delete'
+  })
+}
+
+// 创建新闻（管理员）
+export function createNews(data) {
+  return request({
+    url: '/trading/admin/news/create/',
+    method: 'post',
+    data
+  })
+}
+
+// 更新新闻（管理员）
+export function updateNews(newsId, data) {
+  return request({
+    url: `/trading/admin/news/${newsId}/update/`,
+    method: 'put',
+    data
+  })
+}
+
+// 获取管理员新闻列表
+export function getAdminNewsList(params) {
+  return request({
+    url: '/trading/admin/news/',
+    method: 'get',
+    params
+  })
+}

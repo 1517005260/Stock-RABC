@@ -39,7 +39,6 @@ module.exports = {
         .include.add(resolve('src/icons'))
         // 结束
         .end()
-        // 新增了一个解析的loader
         .use('svg-sprite-loader')
         // 具体的loader
         .loader('svg-sprite-loader')
