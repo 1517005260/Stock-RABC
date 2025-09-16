@@ -599,8 +599,18 @@ export default {
         if (typeof getStockIntradayChart === 'function') {
           const response = await getStockIntradayChart(this.tsCode)
           if (response.data.code === 200 && response.data.data) {
-            // 分时图数据格式: [{time: '09:30', price: 12.34}, ...]
-            this.realtimeData = response.data.data
+            // 处理恢复的数据格式: {time: [], price: []}
+            const chartData = response.data.data
+            if (chartData.time && chartData.price && Array.isArray(chartData.time) && Array.isArray(chartData.price)) {
+              // 转换为内部格式: [{time: '09:30', price: 12.34}, ...]
+              this.realtimeData = chartData.time.map((time, index) => ({
+                time: time,
+                price: chartData.price[index]
+              }))
+            } else {
+              // 兼容可能的其他格式
+              this.realtimeData = Array.isArray(chartData) ? chartData : []
+            }
 
             // 如果返回了数据日期信息，显示给用户
             if (response.data.date) {

@@ -777,124 +777,117 @@ class RateLimiter:
 
 
 class IntradayDataService:
-    """分时数据服务"""
-    
+    """分时数据服务 - 参考sample项目方式，支持多数据源策略"""
+
     @staticmethod
     def get_stock_intraday_from_tushare(ts_code):
-        """从Tushare获取分时数据 - 支持当日和历史数据"""
+        """从Tushare获取分时数据 - 参考sample项目使用get_today_ticks"""
         try:
             import tushare as ts
-            from datetime import date, datetime, timedelta
+
+            # 检查是否为工作日
+            from datetime import date, datetime
             from chinese_calendar import is_workday, is_holiday
-            import time
+
+            today = date.today()
+            if not is_workday(today) or is_holiday(today):
+                return {'success': False, 'message': '非交易日', 'data': None}
 
             # 转换股票代码格式：000007.SZ -> 000007
             stock_code = ts_code.split('.')[0]
 
-            # 确定要获取数据的日期
-            today = date.today()
-            target_date = today
+            # 使用sample项目的方式获取今日分时数据
+            df = ts.get_today_ticks(stock_code)
 
-            # 如果今天是工作日且在交易时间内，获取今日数据
-            now = datetime.now()
-            is_trading_day = is_workday(today) and not is_holiday(today)
-            is_trading_time = (9 <= now.hour < 15) or (now.hour == 15 and now.minute <= 30)
+            if df is not None and not df.empty:
+                # 转换为标准格式
+                times = []
+                prices = []
 
-            if not (is_trading_day and is_trading_time):
-                # 非交易时间，找上一个交易日
-                target_date = today - timedelta(days=1)
-                while not is_workday(target_date) or is_holiday(target_date):
-                    target_date = target_date - timedelta(days=1)
+                for _, row in df.iterrows():
+                    time_str = str(row['time'])  # 091505格式
+                    price = float(row['price'])
 
-            try:
-                # 获取分时数据
-                if target_date == today and is_trading_day and is_trading_time:
-                    # 今日交易时间内，获取今日数据
-                    df = ts.get_today_ticks(stock_code)
-                    data_source = f"tushare_today"
-                else:
-                    # 获取历史分时数据
-                    date_str = target_date.strftime('%Y-%m-%d')
-                    df = ts.get_tick_data(stock_code, date=date_str)
-                    data_source = f"tushare_history_{date_str}"
+                    # 转换时间格式：091505 -> 09:15
+                    if len(time_str) == 6:
+                        formatted_time = f"{time_str[:2]}:{time_str[2:4]}"
+                        times.append(formatted_time)
+                        prices.append(price)
 
-                if df is not None and not df.empty:
-                    # 转换为前端期望的格式：[{time: '09:30', price: 12.34}, ...]
-                    intraday_data = []
-
-                    for _, row in df.iterrows():
-                        time_str = str(row['time'])  # 091505格式或15:00:00格式
-                        price = float(row['price'])
-
-                        # 处理不同的时间格式
-                        if len(time_str) == 6 and time_str.isdigit():
-                            # 091505格式 -> 09:15
-                            formatted_time = f"{time_str[:2]}:{time_str[2:4]}"
-                        elif ':' in time_str:
-                            # 15:00:00格式 -> 15:00
-                            formatted_time = time_str[:5]
-                        else:
-                            continue
-
-                        intraday_data.append({
-                            'time': formatted_time,
-                            'price': price
-                        })
-
-                    return {
-                        'success': True,
-                        'data': intraday_data,
-                        'source': data_source,
-                        'count': len(intraday_data),
-                        'date': target_date.strftime('%Y-%m-%d')
-                    }
-                else:
-                    return {'success': False, 'message': f'Tushare无{target_date}分时数据', 'data': None}
-
-            except Exception as api_error:
-                # API调用失败，尝试获取历史数据
-                if target_date == today:
-                    target_date = today - timedelta(days=1)
-                    while not is_workday(target_date) or is_holiday(target_date):
-                        target_date = target_date - timedelta(days=1)
-
-                    try:
-                        date_str = target_date.strftime('%Y-%m-%d')
-                        df = ts.get_tick_data(stock_code, date=date_str)
-                        if df is not None and not df.empty:
-                            intraday_data = []
-                            for _, row in df.iterrows():
-                                time_str = str(row['time'])
-                                price = float(row['price'])
-                                if ':' in time_str:
-                                    formatted_time = time_str[:5]
-                                    intraday_data.append({
-                                        'time': formatted_time,
-                                        'price': price
-                                    })
-
-                            return {
-                                'success': True,
-                                'data': intraday_data,
-                                'source': f"tushare_fallback_{date_str}",
-                                'count': len(intraday_data),
-                                'date': target_date.strftime('%Y-%m-%d')
-                            }
-                    except:
-                        pass
-
-                raise api_error
+                return {
+                    'success': True,
+                    'data': {'time': times, 'price': prices},
+                    'source': 'tushare',
+                    'count': len(times)
+                }
+            else:
+                return {'success': False, 'message': 'Tushare无分时数据', 'data': None}
 
         except Exception as e:
             return {'success': False, 'message': f'Tushare分时数据获取失败: {str(e)}', 'data': None}
 
     @staticmethod
-    def get_stock_intraday_from_tencent(ts_code):
-        """从腾讯财经API获取分时数据 - 支持当日和历史数据"""
+    def get_stock_intraday_from_eastmoney(ts_code):
+        """从东方财富API获取分时数据"""
         try:
             import requests
-            from datetime import date, datetime, timedelta
-            from chinese_calendar import is_workday, is_holiday
+
+            # 转换股票代码格式
+            if ts_code.endswith('.SZ'):
+                secid = f"0.{ts_code.split('.')[0]}"
+            elif ts_code.endswith('.SH'):
+                secid = f"1.{ts_code.split('.')[0]}"
+            else:
+                return {'success': False, 'message': '不支持的股票代码格式', 'data': None}
+
+            # 东方财富分时数据接口
+            url = "http://push2his.eastmoney.com/api/qt/stock/trends2/get"
+            params = {
+                'secid': secid,
+                'fields1': 'f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13',
+                'fields2': 'f51,f52,f53,f54,f55,f56,f57,f58',
+                'iscr': '0'
+            }
+
+            response = requests.get(url, params=params, timeout=10)
+
+            if response.status_code == 200:
+                data = response.json()
+                if 'data' in data and data['data'] and 'trends' in data['data']:
+                    trends = data['data']['trends']
+                    if trends:
+                        times = []
+                        prices = []
+
+                        for trend in trends:
+                            parts = trend.split(',')
+                            if len(parts) >= 2:
+                                time_str = parts[0]  # 2025-09-12 09:30 格式
+                                price = float(parts[1])
+
+                                # 提取时间部分：2025-09-12 09:30 -> 09:30
+                                if ' ' in time_str:
+                                    time_only = time_str.split(' ')[1]
+                                    times.append(time_only)
+                                    prices.append(price)
+
+                        return {
+                            'success': True,
+                            'data': {'time': times, 'price': prices},
+                            'source': 'eastmoney',
+                            'count': len(times)
+                        }
+
+            return {'success': False, 'message': '东方财富无分时数据', 'data': None}
+
+        except Exception as e:
+            return {'success': False, 'message': f'东方财富分时数据获取失败: {str(e)}', 'data': None}
+
+    @staticmethod
+    def get_stock_intraday_from_tencent(ts_code):
+        """从腾讯财经API获取分时数据"""
+        try:
+            import requests
 
             # 转换股票代码格式
             if ts_code.endswith('.SZ'):
@@ -904,76 +897,34 @@ class IntradayDataService:
             else:
                 return {'success': False, 'message': '不支持的股票代码格式', 'data': None}
 
-            # 确定要获取数据的日期
-            today = date.today()
-            now = datetime.now()
-            is_trading_day = is_workday(today) and not is_holiday(today)
-            is_trading_time = (9 <= now.hour < 15) or (now.hour == 15 and now.minute <= 30)
-
-            target_date = today
-            if not (is_trading_day and is_trading_time):
-                # 非交易时间，找上一个交易日
-                target_date = today - timedelta(days=1)
-                while not is_workday(target_date) or is_holiday(target_date):
-                    target_date = target_date - timedelta(days=1)
-
             # 腾讯分时数据接口
             market = stock_code[:2]  # sz or sh
             code = stock_code[2:]    # 6位数字
 
-            # 当日数据和历史数据使用相同的URL（腾讯API会自动返回最新可用数据）
             url = f"http://data.gtimg.cn/flashdata/hushen/minute/{market}{code}.js"
             response = requests.get(url, timeout=10)
 
             if response.status_code == 200 and response.text:
                 lines = response.text.strip().split('\n')
-                intraday_data = []
+                valid_lines = [line for line in lines if ' ' in line and ':' in line]
 
-                for line in lines:
-                    line = line.strip()
-                    # 跳过非数据行
-                    if not line or 'min_data' in line or 'date:' in line or line == '"':
-                        continue
+                if valid_lines:
+                    times = []
+                    prices = []
 
-                    parts = line.split(' ')
-                    if len(parts) >= 2:
-                        try:
-                            time_str = parts[0]  # 0930 格式
+                    for line in valid_lines:
+                        parts = line.split(' ')
+                        if len(parts) >= 2:
+                            time_str = parts[0]  # 09:30 格式
                             price = float(parts[1])
-
-                            # 转换时间格式：0930 -> 09:30
-                            if len(time_str) == 4 and time_str.isdigit():
-                                formatted_time = f"{time_str[:2]}:{time_str[2:]}"
-                                intraday_data.append({
-                                    'time': formatted_time,
-                                    'price': price
-                                })
-                        except (ValueError, IndexError):
-                            continue
-
-                if intraday_data:
-                    # 检查数据日期（从响应中解析）
-                    data_date = target_date.strftime('%Y-%m-%d')
-                    for line in lines:
-                        if 'date:' in line:
-                            try:
-                                # 解析date:211008格式
-                                date_part = line.split('date:')[1].strip()
-                                if len(date_part) == 6:
-                                    year = '20' + date_part[:2]
-                                    month = date_part[2:4]
-                                    day = date_part[4:6]
-                                    data_date = f"{year}-{month}-{day}"
-                                    break
-                            except:
-                                pass
+                            times.append(time_str)
+                            prices.append(price)
 
                     return {
                         'success': True,
-                        'data': intraday_data,
+                        'data': {'time': times, 'price': prices},
                         'source': 'tencent',
-                        'count': len(intraday_data),
-                        'date': data_date
+                        'count': len(times)
                     }
 
             return {'success': False, 'message': '腾讯无分时数据', 'data': None}
@@ -984,9 +935,10 @@ class IntradayDataService:
     
     @staticmethod
     def get_stock_intraday_multi_source(ts_code):
-        """多数据源策略获取分时数据 - 优先使用腾讯API（价格准确）"""
-        # 优先级: 腾讯（价格准确） > tushare（价格可能错误）
+        """多数据源策略获取分时数据"""
+        # 优先级: 东方财富 > 腾讯 > Tushare
         data_sources = [
+            ('eastmoney', IntradayDataService.get_stock_intraday_from_eastmoney),
             ('tencent', IntradayDataService.get_stock_intraday_from_tencent),
             ('tushare', IntradayDataService.get_stock_intraday_from_tushare)
         ]
@@ -1016,6 +968,7 @@ class IntradayDataService:
             'message': '所有数据源都无法获取分时数据，请稍后重试',
             'data': None
         }
+
 
 
 class RealTimeDataService:
