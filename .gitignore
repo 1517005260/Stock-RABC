@@ -32,6 +32,7 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 cover/
+*.rdb
 
 # Vue 相关
 .DS_Store

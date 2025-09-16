@@ -43,7 +43,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework_jwt',
     'channels',  # WebSocket支持
-    'django_crontab',  # 定时任务支持
+    # 'django_crontab',  # 定时任务支持 - Windows系统暂时禁用
     'user.apps.UserConfig',
     'role.apps.RoleConfig',
     'chat.apps.ChatConfig',
@@ -157,6 +157,37 @@ AUTH_PASSWORD_VALIDATORS = [
 # 请在生产环境中替换为真实的TuShare API Token
 # 可以从环境变量中读取，确保安全性
 TUSHARE_TOKEN = os.getenv('TUSHARE_TOKEN', 'your_tushare_token_here')
+
+# Redis缓存配置
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": os.getenv('REDIS_URL', 'redis://127.0.0.1:6379/1'),
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+        },
+        "KEY_PREFIX": "mini_rabc",
+        "TIMEOUT": 60 * 30,  # 默认30分钟过期
+    }
+}
+
+# 市场数据缓存配置
+MARKET_DATA_CACHE = {
+    'CACHE_KEY': 'market_overview_data',
+    'EXPIRE_TIME': 60 * 30,  # 30分钟过期
+    'UPDATE_INTERVAL': 60 * 30,  # 30分钟更新间隔
+}
+
+# 定时任务配置 - Windows系统暂时禁用django-crontab
+# 可使用 python market_data_cron.py 手动更新缓存
+# CRONJOBS = [
+#     # 每30分钟更新市场数据缓存（交易时间内更频繁）
+#     ('*/30 9-11,13-15 * * 1-5', 'market_data_cron.update_market_cache', '>> /tmp/market_cache.log 2>&1'),
+#     # 非交易时间每小时检查一次
+#     ('0 8,12,16-23 * * 1-5', 'market_data_cron.update_market_cache', '>> /tmp/market_cache.log 2>&1'),
+#     # 周末每2小时检查一次
+#     ('0 */2 * * 0,6', 'market_data_cron.update_market_cache', '>> /tmp/market_cache.log 2>&1'),
+# ]
 
 # 股票数据更新频率（秒）
 STOCK_DATA_REFRESH_INTERVAL = 30

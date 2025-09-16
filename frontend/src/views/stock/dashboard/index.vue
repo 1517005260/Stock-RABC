@@ -172,15 +172,15 @@
           <div class="money-flow">
             <h4>资金流向</h4>
             <div class="flow-item">
-              <span>主力净流入:</span>
+              <span>净流入:</span>
               <span class="flow-value" :class="marketStats.main_flow > 0 ? 'price-up' : 'price-down'">
-                {{ formatMoney(marketStats.main_flow) }}
+                {{ formatMoney(marketStats.main_flow) }}亿
               </span>
             </div>
             <div class="flow-item">
-              <span>散户净流入:</span>
-              <span class="flow-value" :class="marketStats.retail_flow > 0 ? 'price-up' : 'price-down'">
-                {{ formatMoney(marketStats.retail_flow) }}
+              <span>资金状态:</span>
+              <span class="flow-value" :class="marketStats.main_flow > 0 ? 'price-up' : 'price-down'">
+                {{ marketStats.main_flow > 0 ? '净流入' : '净流出' }}
               </span>
             </div>
           </div>
@@ -304,9 +304,7 @@ export default {
       marketStats: {
         up_count: 0,
         down_count: 0,
-        flat_count: 0
-      },
-      moneyFlow: {
+        flat_count: 0,
         main_flow: 0,
         retail_flow: 0
       },
@@ -876,20 +874,48 @@ export default {
     async getMarketOverviewData() {
       try {
         const response = await getMarketOverview()
+        console.log('市场概况API完整响应:', response.data) // 调试日志
+
         if (response.data.code === 200 && response.data.data) {
           const marketStats = response.data.data.market_stats || {}
+          console.log('市场统计原始数据:', marketStats) // 调试日志
 
-          // 更新涨跌分布数据
+          // 使用API返回的真实数据，适配新的字段结构
           this.marketStats.up_count = marketStats.up_count || 0
           this.marketStats.down_count = marketStats.down_count || 0
           this.marketStats.flat_count = marketStats.flat_count || 0
-          this.marketStats.main_flow = marketStats.main_flow || 0
-          this.marketStats.retail_flow = marketStats.retail_flow || 0
 
-          console.log('市场概况数据获取成功:', marketStats)
+          // 适配新的资金流向字段结构
+          // 后端返回: net_inflow, total_inflow, total_outflow
+          // 前端显示: main_flow(净流入)
+          this.marketStats.main_flow = marketStats.net_inflow || 0
+          this.marketStats.retail_flow = 0  // 暂时设为0，或者显示总流出
+
+          // 更新指数数据
+          if (response.data.data.indices && Array.isArray(response.data.data.indices)) {
+            this.marketIndices = response.data.data.indices.map(index => ({
+              code: index.code || index.ts_code,
+              name: index.name,
+              current: index.current || index.current_price,
+              change: index.change,
+              pct_chg: index.pct_chg
+            }))
+          }
+
+          console.log('处理后的市场数据:', {
+            marketStats: this.marketStats,
+            indices: this.marketIndices,
+            dataSource: response.data.data.data_source
+          })
+        } else {
+          console.error('市场概况API返回错误:', response.data)
+          // 即使出错也要提示用户
+          this.$message.warning('市场数据获取失败，显示默认数据')
         }
       } catch (error) {
         console.error('获取市场概况失败:', error)
+        console.error('错误详情:', error.response?.data)
+        this.$message.error('网络连接失败，无法获取市场数据')
       }
     },
 
@@ -1033,13 +1059,8 @@ export default {
     },
     formatMoney(value) {
       if (!value) return '0'
-      const absValue = Math.abs(value)
-      if (absValue >= 100000000) {
-        return (value / 100000000).toFixed(2) + '亿'
-      } else if (absValue >= 10000) {
-        return (value / 10000).toFixed(2) + '万'
-      }
-      return value.toLocaleString()
+      // 数据已经是亿为单位，直接保留2位小数
+      return Math.abs(value).toFixed(2)
     },
 
     // 计算移动平均线

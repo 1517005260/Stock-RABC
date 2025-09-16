@@ -283,6 +283,45 @@ export default {
               color0: this.downColor,
               borderColor: this.upBorderColor,
               borderColor0: this.downBorderColor
+            },
+            markPoint: {
+              label: {
+                formatter: function (param) {
+                  return param != null ? Math.round(param.value) : ''
+                }
+              },
+              data: [
+                {
+                  name: 'highest value',
+                  type: 'max',
+                  valueDim: 'highest'
+                },
+                {
+                  name: 'lowest value',
+                  type: 'min',
+                  valueDim: 'lowest'
+                },
+                {
+                  name: 'average value on close',
+                  type: 'average',
+                  valueDim: 'close'
+                }
+              ]
+            },
+            markLine: {
+              symbol: ['none', 'none'],
+              data: [
+                {
+                  name: 'min line on close',
+                  type: 'min',
+                  valueDim: 'close'
+                },
+                {
+                  name: 'max line on close',
+                  type: 'max',
+                  valueDim: 'close'
+                }
+              ]
             }
           },
           // MA5

@@ -18,6 +18,8 @@ urlpatterns = [
     path('realtime/chart/<str:ts_code>/', views.get_intraday_chart, name='get_intraday_chart'), # GET 分时图数据
     path('realtime/price/<str:ts_code>/', views.stock_realtime_price, name='stock_realtime_price'), # GET 实时价格
     path('market/overview/', views.market_overview, name='market_overview'),              # GET 市场概况
+    path('market/cache/refresh/', views.refresh_market_cache, name='refresh_market_cache'),  # POST 刷新缓存
+    path('market/cache/status/', views.cache_status, name='cache_status'),                    # GET 缓存状态
     
     # K线图和技术分析相关
     path('kline/<str:ts_code>/', views.stock_kline_data, name='stock_kline_data'),                   # GET K线数据

@@ -145,7 +145,7 @@ def buy_stock(request):
             position.current_price = Decimal(str(price))
             position.save()
             
-            # 记录交易历史 - 模拟股票交易，这里直接成交
+            # 记录交易历史
             TradeRecord.objects.create(
                 user=user,
                 ts_code=ts_code,
@@ -554,12 +554,12 @@ def get_watchlist(request):
                 'current_price': float(latest_daily.close) if latest_daily and latest_daily.close else None,
                 'change': float(latest_daily.change) if latest_daily and latest_daily.change else None,
                 'pct_chg': float(latest_daily.pct_chg) if latest_daily and latest_daily.pct_chg else None,
-                # 只返回真实存在的字段，不模拟任何数据
+                # 只返回真实存在的字段
                 'volume': latest_daily.vol if latest_daily else None,
                 'amount': float(latest_daily.amount) if latest_daily and latest_daily.amount else None,
-                'turnover_rate': None,  # 不模拟，显示 "--"
-                'pe_ratio': None,       # 不模拟，显示 "--"
-                'market_cap': None,     # 不模拟，显示 "--"
+                'turnover_rate': None,
+                'pe_ratio': None,
+                'market_cap': None,
                 'trade_date': latest_daily.trade_date.strftime('%Y-%m-%d') if latest_daily else None,
                 'open': float(latest_daily.open) if latest_daily and latest_daily.open else None,
                 'high': float(latest_daily.high) if latest_daily and latest_daily.high else None,

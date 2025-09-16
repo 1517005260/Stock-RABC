@@ -327,6 +327,34 @@ def create_sample_news():
             print(f"  创建新闻: {news['title'][:20]}...")
 
 
+def init_market_data_cache():
+    """初始化市场数据到Redis缓存"""
+    print("\n=== 初始化市场数据缓存 ===")
+
+    try:
+        from stock.redis_cache import MarketDataCache
+
+        print("正在获取完整市场数据并缓存到Redis...")
+        result = MarketDataCache.refresh_market_data()
+
+        if result['success']:
+            market_stats = result['data']['market_stats']
+            print(f"✅ 市场数据缓存成功!")
+            print(f"   - 股票数量: {market_stats.get('total_count', 0)}只")
+            print(f"   - 上涨: {market_stats.get('up_count', 0)}只")
+            print(f"   - 下跌: {market_stats.get('down_count', 0)}只")
+            print(f"   - 净流入: {market_stats.get('net_inflow', 0)}亿元")
+            print(f"   - 获取耗时: {result.get('fetch_duration', 0)}秒")
+            print(f"   - 缓存时间: {result.get('cache_time')}")
+            print(f"   - 30分钟后自动过期")
+        else:
+            print(f"❌ 市场数据缓存失败: {result['message']}")
+
+    except Exception as e:
+        print(f"❌ 市场数据缓存异常: {e}")
+        print("   可能是Redis未启动或网络问题，可稍后手动刷新")
+
+
 def main():
     """主函数"""
     print("Mini-RABC 统一系统初始化")
@@ -358,6 +386,9 @@ def main():
         
         # 8. 同步真实股票数据（放在事务外，因为可能耗时较长）
         sync_real_stock_data()
+
+        # 9. 初始化市场数据缓存（放在最后，确保有股票数据）
+        init_market_data_cache()
         
         print("\n" + "=" * 50)
         print("系统初始化完成！")

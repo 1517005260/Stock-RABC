@@ -17,12 +17,17 @@ channels>=4.3.1
 # 定时任务支持
 django-crontab>=0.7.1
 
+# Redis缓存支持
+redis>=5.0.0
+django-redis>=5.4.0
+
 # 网页解析和爬虫
 beautifulsoup4>=4.13.0
 requests>=2.31.0
 
 # 股票数据和分析
 tushare>=1.2.89
+akshare>=1.12.0
 pandas>=1.5.0
 numpy>=1.21.0
 

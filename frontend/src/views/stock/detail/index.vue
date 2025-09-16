@@ -57,6 +57,10 @@
                   <span class="value price-up">{{ stockDetail.high_price || '--' }}</span>
                 </div>
                 <div class="info-item">
+                  <span class="label">买一价:</span>
+                  <span class="value price-down">{{ stockDetail.bid_price || '--' }}</span>
+                </div>
+                <div class="info-item">
                   <span class="label">成交量:</span>
                   <span class="value">{{ formatVolume(stockDetail.volume) }}</span>
                 </div>
@@ -69,6 +73,10 @@
                 <div class="info-item">
                   <span class="label">最低:</span>
                   <span class="value price-down">{{ stockDetail.low_price || '--' }}</span>
+                </div>
+                <div class="info-item">
+                  <span class="label">卖一价:</span>
+                  <span class="value price-up">{{ stockDetail.ask_price || '--' }}</span>
                 </div>
                 <div class="info-item">
                   <span class="label">成交额:</span>
@@ -192,7 +200,20 @@
         </el-form-item>
         
         <el-form-item label="当前价格">
-          <el-input :value="stockDetail?.current_price" readonly />
+          <div class="price-display">
+            <div class="price-item">
+              <span class="price-label">最新价:</span>
+              <span class="price-value">{{ stockDetail?.current_price || '--' }}</span>
+            </div>
+            <div class="price-item">
+              <span class="price-label">买一价:</span>
+              <span class="price-value price-down">{{ stockDetail?.bid_price || '--' }}</span>
+            </div>
+            <div class="price-item">
+              <span class="price-label">卖一价:</span>
+              <span class="price-value price-up">{{ stockDetail?.ask_price || '--' }}</span>
+            </div>
+          </div>
         </el-form-item>
         
         <el-form-item label="交易数量">
@@ -209,6 +230,9 @@
         <el-form-item label="预估金额">
           <div class="estimated-amount">
             ¥{{ calculateTradeAmount() }}
+            <div class="trade-price-note">
+              * 买入将按卖一价 {{ stockDetail?.ask_price || '--' }} 执行
+            </div>
           </div>
         </el-form-item>
       </el-form>
@@ -231,7 +255,7 @@
 
 <script>
 import { ArrowLeft, Star, StarFilled } from '@element-plus/icons-vue'
-import { getStockDetail, getRealtimeData } from '@/api/stock'
+import { getStockDetail, getStockIntradayChart } from '@/api/stock'
 import { buyStock } from '@/api/trading'
 import KlineChart from '@/components/KlineChart.vue'
 import StockHoldersChart from '@/components/StockHoldersChart.vue'
@@ -373,6 +397,14 @@ export default {
       const times = validPairs.map(item => formatTime(item.time))
       const prices = validPairs.map(item => parseFloat(item.price))
 
+      // 计算价格范围，确保Y轴显示合理
+      const minPrice = Math.min(...prices)
+      const maxPrice = Math.max(...prices)
+      const priceRange = maxPrice - minPrice
+      const padding = priceRange * 0.1 // 10%的padding
+      const yAxisMin = Math.max(0, minPrice - padding)
+      const yAxisMax = maxPrice + padding
+
       return markRaw({
         title: {
           text: '实时股价',
@@ -382,6 +414,10 @@ export default {
           trigger: 'axis',
           position: function (pt) {
             return [pt[0], '10%']
+          },
+          formatter: function (params) {
+            const item = params[0]
+            return `时间: ${item.axisValue}<br/>价格: ¥${item.value}`
           }
         },
         toolbox: {
@@ -396,11 +432,25 @@ export default {
         xAxis: {
           type: 'category',
           boundaryGap: false,
-          data: times
+          data: times,
+          axisLabel: {
+            interval: Math.max(1, Math.floor(times.length / 8)) // 动态间隔显示时间标签
+          }
         },
         yAxis: {
           type: 'value',
-          boundaryGap: [0, '100%']
+          min: yAxisMin,
+          max: yAxisMax,
+          scale: true,
+          axisLabel: {
+            formatter: '¥{value}'
+          },
+          splitLine: {
+            show: true,
+            lineStyle: {
+              color: '#f0f0f0'
+            }
+          }
         },
         dataZoom: [
           {
@@ -482,31 +532,53 @@ export default {
 
     async updateRealtimePrice() {
       try {
-        const { getStockIntradayChart } = await import('@/api/stock')
-        const response = await getStockIntradayChart(this.tsCode)
+        // 使用新的实时价格API获取买卖价格
+        const { getStockRealtimePrice } = await import('@/api/stock')
+        const response = await getStockRealtimePrice(this.tsCode)
 
         if (response.data.code === 200 && response.data.data && this.stockDetail) {
-          const chartData = response.data.data
-          // 取最新的分时数据作为当前价格
-          if (chartData.price && Array.isArray(chartData.price) && chartData.price.length > 0) {
-            const newPrice = parseFloat(chartData.price[chartData.price.length - 1])
+          const priceData = response.data.data
 
-            // 更新当前价格
-            this.stockDetail.current_price = newPrice
+          // 更新所有价格信息
+          this.stockDetail.current_price = priceData.current_price
+          this.stockDetail.bid_price = priceData.bid_price
+          this.stockDetail.ask_price = priceData.ask_price
+          this.stockDetail.open_price = priceData.open_price
+          this.stockDetail.high_price = priceData.high_price
+          this.stockDetail.low_price = priceData.low_price
+          this.stockDetail.change = priceData.change
+          this.stockDetail.pct_chg = priceData.pct_chg
+          this.stockDetail.volume = priceData.volume
+          this.stockDetail.amount = priceData.amount
 
-            // 计算涨跌幅
-            if (this.stockDetail.pre_close) {
-              const preClose = parseFloat(this.stockDetail.pre_close)
-              this.stockDetail.change = newPrice - preClose
-              this.stockDetail.pct_chg = ((newPrice - preClose) / preClose * 100)
-            }
-
-            console.log(`详情页价格已更新: ${newPrice}`)
-          }
+          console.log(`价格已更新: 最新=${priceData.current_price}, 买一=${priceData.bid_price}, 卖一=${priceData.ask_price}`)
         }
       } catch (error) {
         console.error('获取实时价格失败:', error)
-        // 不显示错误消息，因为这是辅助功能
+        // 回退到分时图数据更新
+        try {
+          const { getStockIntradayChart } = await import('@/api/stock')
+          const response = await getStockIntradayChart(this.tsCode)
+
+          if (response.data.code === 200 && response.data.data && this.stockDetail) {
+            const chartData = response.data.data
+            if (chartData.price && Array.isArray(chartData.price) && chartData.price.length > 0) {
+              const newPrice = parseFloat(chartData.price[chartData.price.length - 1])
+              this.stockDetail.current_price = newPrice
+
+              // 计算涨跌幅
+              if (this.stockDetail.pre_close) {
+                const preClose = parseFloat(this.stockDetail.pre_close)
+                this.stockDetail.change = newPrice - preClose
+                this.stockDetail.pct_chg = ((newPrice - preClose) / preClose * 100)
+              }
+
+              console.log(`回退价格更新: ${newPrice}`)
+            }
+          }
+        } catch (fallbackError) {
+          console.error('回退价格更新也失败:', fallbackError)
+        }
       }
     },
     
@@ -516,11 +588,6 @@ export default {
     },
     
     switchToRealtime() {
-      if (!this.isMarketOpen) {
-        this.$message.warning('当前非交易时间，无法查看实时股价！交易时间：工作日 9:30-11:30, 13:00-15:00')
-        return
-      }
-
       this.chartMode = 'realtime'
       this.loadRealtimeData()
       this.startRealtimeTimer()
@@ -529,21 +596,33 @@ export default {
     async loadRealtimeData() {
       this.realtimeLoading = true
       try {
-        if (typeof getRealtimeData === 'function') {
-          const response = await getRealtimeData(this.tsCode)
+        if (typeof getStockIntradayChart === 'function') {
+          const response = await getStockIntradayChart(this.tsCode)
           if (response.data.code === 200 && response.data.data) {
+            // 分时图数据格式: [{time: '09:30', price: 12.34}, ...]
             this.realtimeData = response.data.data
+
+            // 如果返回了数据日期信息，显示给用户
+            if (response.data.date) {
+              const dataDate = response.data.date
+              const today = new Date().toISOString().split('T')[0]
+              if (dataDate !== today) {
+                this.$message.info(`当前非交易时间，显示 ${dataDate} 的分时数据`)
+              }
+            }
           } else {
-            console.warn('无实时数据:', response.data.msg)
+            console.warn('无分时数据:', response.data.msg)
             this.realtimeData = []
+            this.$message.warning(`获取分时数据失败: ${response.data.msg}`)
           }
         } else {
-          console.warn('实时数据API未配置')
+          console.warn('分时数据API未配置')
           this.realtimeData = []
         }
       } catch (error) {
-        console.error('获取实时数据失败:', error)
+        console.error('获取分时数据失败:', error)
         this.realtimeData = []
+        this.$message.error('获取分时数据失败，请稍后重试')
       } finally {
         this.realtimeLoading = false
       }
@@ -568,10 +647,12 @@ export default {
     },
     
     calculateTradeAmount() {
-      if (!this.stockDetail?.current_price || !this.tradeForm.shares) {
+      // 买入使用卖一价，如果没有卖一价则使用当前价格
+      const tradePrice = this.stockDetail?.ask_price || this.stockDetail?.current_price
+      if (!tradePrice || !this.tradeForm.shares) {
         return '0.00'
       }
-      const amount = this.stockDetail.current_price * this.tradeForm.shares
+      const amount = tradePrice * this.tradeForm.shares
       return amount.toFixed(2)
     },
     
@@ -594,15 +675,20 @@ export default {
 
       this.tradeExecuting = true
       try {
+        // 买入使用卖一价，确保使用真实的交易价格
+        const tradePrice = this.stockDetail.ask_price || this.stockDetail.current_price
+
         const response = await buyStock({
           ts_code: this.tsCode,
-          price: this.stockDetail.current_price,
+          price: tradePrice,  // 使用卖一价作为买入价格
           shares: this.tradeForm.shares
         })
-        
+
         if (response.data.flag === 1) {
-          this.$message.success('买入成功！')
+          this.$message.success(`买入成功！成交价格: ¥${tradePrice}`)
           this.tradeDialogVisible = false
+          // 刷新股票信息
+          await this.updateRealtimePrice()
         } else {
           this.$message.error(response.data.msg || '买入失败')
         }
@@ -854,6 +940,40 @@ export default {
   font-size: 18px;
   font-weight: bold;
   color: #dd4b39;
+}
+
+.trade-price-note {
+  font-size: 12px;
+  color: #666;
+  margin-top: 5px;
+  font-weight: normal;
+}
+
+.price-display {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: #f8f9fa;
+  border-radius: 6px;
+}
+
+.price-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.price-label {
+  font-size: 14px;
+  color: #666;
+  font-weight: 500;
+}
+
+.price-value {
+  font-size: 16px;
+  font-weight: bold;
+  color: #333;
 }
 
 .dialog-footer {

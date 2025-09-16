@@ -160,8 +160,192 @@ RBAC的主要优势：
 
 ## 如何开始
 
-1. 克隆仓库
-2. 按照前端和后端的README分别设置和启动服务
-3. 访问前端页面，默认为 http://localhost:8080
+### 前置要求
 
-详细步骤请参考各自目录中的README文件。
+1. Python 3.10+
+2. Node.js 16+
+3. Redis 服务器
+
+### 快速启动指南
+
+#### 1. 克隆仓库并安装依赖
+```bash
+git clone <repository-url>
+cd Mini-RABC
+
+# 后端依赖
+cd backend
+pip install -r requirements.txt
+
+# 前端依赖
+cd ../frontend
+npm install
+```
+
+#### 2. 启动Redis服务器
+
+**Windows系统**：
+```bash
+# 下载并安装Redis for Windows
+# https://github.com/microsoftarchive/redis/releases
+# 或使用Chocolatey安装：
+choco install redis-64
+
+# 启动Redis服务
+redis-server
+
+# 验证Redis是否正常运行
+redis-cli ping
+# 应该返回：PONG
+```
+
+**Linux/macOS系统**：
+```bash
+# Ubuntu/Debian
+sudo apt-get install redis-server
+sudo systemctl start redis-server
+
+# macOS (使用Homebrew)
+brew install redis
+brew services start redis
+
+# 验证Redis是否正常运行
+redis-cli ping
+# 应该返回：PONG
+```
+
+#### 3. 初始化后端系统
+```bash
+cd backend
+
+# 一键初始化数据库、用户数据和市场数据缓存
+python init_system.py
+```
+
+#### 4. 配置定时任务（可选 - 用于自动更新市场数据）
+
+```bash
+# 添加定时任务到系统crontab
+python manage.py crontab add
+
+# 查看已添加的定时任务
+python manage.py crontab show
+
+# 移除定时任务（如需要）
+python manage.py crontab remove
+```
+
+#### 5. 启动完整系统（四个服务）
+
+**Windows系统完整启动流程**：
+
+**第一步：启动Redis服务器**
+```bash
+# Redis应该已经作为Windows服务运行，检查状态：
+redis-cli ping
+# 应该返回：PONG
+
+# 如果Redis未运行，手动启动：
+redis-server
+```
+
+**第二步：启动Django后端服务器**
+```bash
+cd backend
+
+# 启动HTTP服务器
+python manage.py runserver
+
+# 后端将在 http://localhost:8000 运行
+```
+
+**第三步：启动前端开发服务器**
+```bash
+# 打开新的终端窗口
+cd frontend
+
+# 启动前端开发服务器
+npm run serve
+
+# 前端将在 http://localhost:8080 运行
+```
+
+**第四步：启动市场数据自动更新器（Windows专用）**
+```bash
+# 打开新的终端窗口
+cd backend
+
+# 方式1：使用批处理脚本（推荐）
+start_market_updater.bat
+
+# 方式2：直接运行Python脚本
+# 30分钟自动更新（推荐）
+python windows_market_updater.py
+
+# 立即更新一次
+python windows_market_updater.py --once
+
+# 自定义15分钟更新间隔
+python windows_market_updater.py --interval 15
+```
+
+**系统架构概览**：
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│  前端服务器     │    │  后端API服务器  │    │  Redis缓存服务  │
+│  :8080          │◄──►│  :8000          │◄──►│  :6379          │
+│  npm run serve  │    │  python manage  │    │  redis-server   │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+                              ▲
+                              │
+                    ┌─────────────────┐
+                    │  市场数据更新器 │
+                    │  每30分钟更新   │
+                    │  windows_market │
+                    │  _updater.py    │
+                    └─────────────────┘
+```
+
+#### 6. 访问系统
+
+- 前端页面：http://localhost:8080
+- 后端API：http://localhost:8000
+- Redis缓存状态：http://localhost:8000/stock/market/cache/status/
+
+**快速验证系统是否正常运行**：
+1. 访问前端页面，检查市场指数显示是否正常
+2. 查看涨跌分布数据是否实时更新
+3. 检查资金流向数据是否非零
+4. 后端日志应显示市场数据更新信息
+
+### 测试账号
+
+系统初始化后提供以下测试账号：
+
+- **超级管理员**: `python222` / `123456`
+- **管理员**: `admin001` / `123456`
+- **普通用户1**: `trader001` / `123456`
+- **普通用户2**: `trader002` / `123456`
+
+### 市场数据缓存说明
+
+系统使用Redis缓存市场数据以提升性能：
+
+- **首次访问**：系统自动从东方财富API获取完整A股数据（约5470只股票）并缓存
+- **后续访问**：从Redis缓存毫秒级响应
+- **自动更新**：定时任务每30分钟自动刷新缓存
+- **手动刷新**：可通过API `/stock/market/cache/refresh/` 手动刷新
+
+### 故障排除
+
+**Redis连接失败**：
+- 确保Redis服务器正在运行：`redis-cli ping`
+- 检查Redis端口（默认6379）是否被占用
+- 查看Redis服务状态和错误日志
+
+**市场数据获取失败**：
+- 检查网络连接
+- 确认东方财富API可访问
+- 查看后端控制台错误信息
+
+详细的前端和后端配置请参考各自目录中的README文件。

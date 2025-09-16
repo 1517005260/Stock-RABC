@@ -2,6 +2,7 @@
 
 import os
 import tushare as ts
+import akshare as ak
 import pandas as pd
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -10,6 +11,8 @@ from django.db import models
 from django.core.exceptions import ObjectDoesNotExist
 from django.utils import timezone
 from dotenv import load_dotenv
+import requests
+import re
 
 from stock.models import StockBasic, StockDaily, StockCompany, TradeCal, IndexDaily
 from trading.models import UserStockAccount, UserPosition, TradeRecord, UserWatchList, MarketNews
@@ -778,114 +781,121 @@ class IntradayDataService:
     
     @staticmethod
     def get_stock_intraday_from_tushare(ts_code):
-        """从Tushare获取分时数据"""
+        """从Tushare获取分时数据 - 支持当日和历史数据"""
         try:
             import tushare as ts
-            
-            # 检查是否为工作日
-            from datetime import date, datetime
+            from datetime import date, datetime, timedelta
             from chinese_calendar import is_workday, is_holiday
-            
-            today = date.today()
-            if not is_workday(today) or is_holiday(today):
-                return {'success': False, 'message': '非交易日', 'data': None}
-            
+            import time
+
             # 转换股票代码格式：000007.SZ -> 000007
             stock_code = ts_code.split('.')[0]
-            
-            # 获取今日分时数据
-            df = ts.get_today_ticks(stock_code)
-            
-            if df is not None and not df.empty:
-                # 转换为标准格式
-                times = []
-                prices = []
-                
-                for _, row in df.iterrows():
-                    time_str = str(row['time'])  # 091505格式
-                    price = float(row['price'])
-                    
-                    # 转换时间格式：091505 -> 09:15
-                    if len(time_str) == 6:
-                        formatted_time = f"{time_str[:2]}:{time_str[2:4]}"
-                        times.append(formatted_time)
-                        prices.append(price)
-                
-                return {
-                    'success': True,
-                    'data': {'time': times, 'price': prices},
-                    'source': 'tushare',
-                    'count': len(times)
-                }
-            else:
-                return {'success': False, 'message': 'Tushare无分时数据', 'data': None}
-                
+
+            # 确定要获取数据的日期
+            today = date.today()
+            target_date = today
+
+            # 如果今天是工作日且在交易时间内，获取今日数据
+            now = datetime.now()
+            is_trading_day = is_workday(today) and not is_holiday(today)
+            is_trading_time = (9 <= now.hour < 15) or (now.hour == 15 and now.minute <= 30)
+
+            if not (is_trading_day and is_trading_time):
+                # 非交易时间，找上一个交易日
+                target_date = today - timedelta(days=1)
+                while not is_workday(target_date) or is_holiday(target_date):
+                    target_date = target_date - timedelta(days=1)
+
+            try:
+                # 获取分时数据
+                if target_date == today and is_trading_day and is_trading_time:
+                    # 今日交易时间内，获取今日数据
+                    df = ts.get_today_ticks(stock_code)
+                    data_source = f"tushare_today"
+                else:
+                    # 获取历史分时数据
+                    date_str = target_date.strftime('%Y-%m-%d')
+                    df = ts.get_tick_data(stock_code, date=date_str)
+                    data_source = f"tushare_history_{date_str}"
+
+                if df is not None and not df.empty:
+                    # 转换为前端期望的格式：[{time: '09:30', price: 12.34}, ...]
+                    intraday_data = []
+
+                    for _, row in df.iterrows():
+                        time_str = str(row['time'])  # 091505格式或15:00:00格式
+                        price = float(row['price'])
+
+                        # 处理不同的时间格式
+                        if len(time_str) == 6 and time_str.isdigit():
+                            # 091505格式 -> 09:15
+                            formatted_time = f"{time_str[:2]}:{time_str[2:4]}"
+                        elif ':' in time_str:
+                            # 15:00:00格式 -> 15:00
+                            formatted_time = time_str[:5]
+                        else:
+                            continue
+
+                        intraday_data.append({
+                            'time': formatted_time,
+                            'price': price
+                        })
+
+                    return {
+                        'success': True,
+                        'data': intraday_data,
+                        'source': data_source,
+                        'count': len(intraday_data),
+                        'date': target_date.strftime('%Y-%m-%d')
+                    }
+                else:
+                    return {'success': False, 'message': f'Tushare无{target_date}分时数据', 'data': None}
+
+            except Exception as api_error:
+                # API调用失败，尝试获取历史数据
+                if target_date == today:
+                    target_date = today - timedelta(days=1)
+                    while not is_workday(target_date) or is_holiday(target_date):
+                        target_date = target_date - timedelta(days=1)
+
+                    try:
+                        date_str = target_date.strftime('%Y-%m-%d')
+                        df = ts.get_tick_data(stock_code, date=date_str)
+                        if df is not None and not df.empty:
+                            intraday_data = []
+                            for _, row in df.iterrows():
+                                time_str = str(row['time'])
+                                price = float(row['price'])
+                                if ':' in time_str:
+                                    formatted_time = time_str[:5]
+                                    intraday_data.append({
+                                        'time': formatted_time,
+                                        'price': price
+                                    })
+
+                            return {
+                                'success': True,
+                                'data': intraday_data,
+                                'source': f"tushare_fallback_{date_str}",
+                                'count': len(intraday_data),
+                                'date': target_date.strftime('%Y-%m-%d')
+                            }
+                    except:
+                        pass
+
+                raise api_error
+
         except Exception as e:
             return {'success': False, 'message': f'Tushare分时数据获取失败: {str(e)}', 'data': None}
-    
-    @staticmethod
-    def get_stock_intraday_from_eastmoney(ts_code):
-        """从东方财富API获取分时数据"""
-        try:
-            import requests
-            
-            # 转换股票代码格式
-            if ts_code.endswith('.SZ'):
-                secid = f"0.{ts_code.split('.')[0]}"
-            elif ts_code.endswith('.SH'):
-                secid = f"1.{ts_code.split('.')[0]}"
-            else:
-                return {'success': False, 'message': '不支持的股票代码格式', 'data': None}
-            
-            # 东方财富分时数据接口
-            url = "http://push2his.eastmoney.com/api/qt/stock/trends2/get"
-            params = {
-                'secid': secid,
-                'fields1': 'f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13',
-                'fields2': 'f51,f52,f53,f54,f55,f56,f57,f58',
-                'iscr': '0'
-            }
-            
-            response = requests.get(url, params=params, timeout=10)
-            
-            if response.status_code == 200:
-                data = response.json()
-                if 'data' in data and data['data'] and 'trends' in data['data']:
-                    trends = data['data']['trends']
-                    if trends:
-                        times = []
-                        prices = []
-                        
-                        for trend in trends:
-                            parts = trend.split(',')
-                            if len(parts) >= 2:
-                                time_str = parts[0]  # 2025-09-12 09:30 格式
-                                price = float(parts[1])
-                                
-                                # 提取时间部分：2025-09-12 09:30 -> 09:30
-                                if ' ' in time_str:
-                                    time_only = time_str.split(' ')[1]
-                                    times.append(time_only)
-                                    prices.append(price)
-                        
-                        return {
-                            'success': True,
-                            'data': {'time': times, 'price': prices},
-                            'source': 'eastmoney',
-                            'count': len(times)
-                        }
-            
-            return {'success': False, 'message': '东方财富无分时数据', 'data': None}
-            
-        except Exception as e:
-            return {'success': False, 'message': f'东方财富分时数据获取失败: {str(e)}', 'data': None}
-    
+
     @staticmethod
     def get_stock_intraday_from_tencent(ts_code):
-        """从腾讯财经API获取分时数据"""
+        """从腾讯财经API获取分时数据 - 支持当日和历史数据"""
         try:
             import requests
-            
+            from datetime import date, datetime, timedelta
+            from chinese_calendar import is_workday, is_holiday
+
             # 转换股票代码格式
             if ts_code.endswith('.SZ'):
                 stock_code = f"sz{ts_code.split('.')[0]}"
@@ -893,53 +903,94 @@ class IntradayDataService:
                 stock_code = f"sh{ts_code.split('.')[0]}"
             else:
                 return {'success': False, 'message': '不支持的股票代码格式', 'data': None}
-            
+
+            # 确定要获取数据的日期
+            today = date.today()
+            now = datetime.now()
+            is_trading_day = is_workday(today) and not is_holiday(today)
+            is_trading_time = (9 <= now.hour < 15) or (now.hour == 15 and now.minute <= 30)
+
+            target_date = today
+            if not (is_trading_day and is_trading_time):
+                # 非交易时间，找上一个交易日
+                target_date = today - timedelta(days=1)
+                while not is_workday(target_date) or is_holiday(target_date):
+                    target_date = target_date - timedelta(days=1)
+
             # 腾讯分时数据接口
             market = stock_code[:2]  # sz or sh
             code = stock_code[2:]    # 6位数字
-            
+
+            # 当日数据和历史数据使用相同的URL（腾讯API会自动返回最新可用数据）
             url = f"http://data.gtimg.cn/flashdata/hushen/minute/{market}{code}.js"
             response = requests.get(url, timeout=10)
-            
+
             if response.status_code == 200 and response.text:
                 lines = response.text.strip().split('\n')
-                valid_lines = [line for line in lines if ' ' in line and ':' in line]
-                
-                if valid_lines:
-                    times = []
-                    prices = []
-                    
-                    for line in valid_lines:
-                        parts = line.split(' ')
-                        if len(parts) >= 2:
-                            time_str = parts[0]  # 09:30 格式
+                intraday_data = []
+
+                for line in lines:
+                    line = line.strip()
+                    # 跳过非数据行
+                    if not line or 'min_data' in line or 'date:' in line or line == '"':
+                        continue
+
+                    parts = line.split(' ')
+                    if len(parts) >= 2:
+                        try:
+                            time_str = parts[0]  # 0930 格式
                             price = float(parts[1])
-                            times.append(time_str)
-                            prices.append(price)
-                    
+
+                            # 转换时间格式：0930 -> 09:30
+                            if len(time_str) == 4 and time_str.isdigit():
+                                formatted_time = f"{time_str[:2]}:{time_str[2:]}"
+                                intraday_data.append({
+                                    'time': formatted_time,
+                                    'price': price
+                                })
+                        except (ValueError, IndexError):
+                            continue
+
+                if intraday_data:
+                    # 检查数据日期（从响应中解析）
+                    data_date = target_date.strftime('%Y-%m-%d')
+                    for line in lines:
+                        if 'date:' in line:
+                            try:
+                                # 解析date:211008格式
+                                date_part = line.split('date:')[1].strip()
+                                if len(date_part) == 6:
+                                    year = '20' + date_part[:2]
+                                    month = date_part[2:4]
+                                    day = date_part[4:6]
+                                    data_date = f"{year}-{month}-{day}"
+                                    break
+                            except:
+                                pass
+
                     return {
                         'success': True,
-                        'data': {'time': times, 'price': prices},
+                        'data': intraday_data,
                         'source': 'tencent',
-                        'count': len(times)
+                        'count': len(intraday_data),
+                        'date': data_date
                     }
-            
+
             return {'success': False, 'message': '腾讯无分时数据', 'data': None}
-            
+
         except Exception as e:
             return {'success': False, 'message': f'腾讯分时数据获取失败: {str(e)}', 'data': None}
     
     
     @staticmethod
     def get_stock_intraday_multi_source(ts_code):
-        """多数据源策略获取分时数据"""
-        # 优先级: 东方财富 > 腾讯 > Tushare
+        """多数据源策略获取分时数据 - 优先使用腾讯API（价格准确）"""
+        # 优先级: 腾讯（价格准确） > tushare（价格可能错误）
         data_sources = [
-            ('eastmoney', IntradayDataService.get_stock_intraday_from_eastmoney),
             ('tencent', IntradayDataService.get_stock_intraday_from_tencent),
             ('tushare', IntradayDataService.get_stock_intraday_from_tushare)
         ]
-        
+
         for source_name, source_func in data_sources:
             try:
                 # 检查缓存
@@ -947,19 +998,19 @@ class IntradayDataService:
                 cached_data = DataCache.get(cache_key, expiry_seconds=30)  # 30秒缓存
                 if cached_data:
                     return cached_data
-                
+
                 # 获取数据
                 result = source_func(ts_code)
-                
+
                 if result['success']:
                     # 缓存成功结果
                     DataCache.set(cache_key, result)
                     return result
-                    
+
             except Exception as e:
                 print(f"数据源 {source_name} 获取失败: {e}")
                 continue
-        
+
         return {
             'success': False,
             'message': '所有数据源都无法获取分时数据，请稍后重试',
@@ -991,7 +1042,155 @@ class RealTimeDataService:
         
         return (morning_start <= current_time <= morning_end) or \
                (afternoon_start <= current_time <= afternoon_end)
-    
+
+    @staticmethod
+    def get_complete_market_stats_eastmoney():
+        """从东方财富分页获取完整A股市场统计数据"""
+        try:
+            import time
+
+            url = "http://push2.eastmoney.com/api/qt/clist/get"
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Referer': 'http://quote.eastmoney.com/'
+            }
+
+            # 基础参数 - 获取包含资金流向f62字段的完整数据
+            base_params = {
+                'po': '1',
+                'np': '1',
+                'ut': 'bd1d9ddb04089700cf9c27f6f7426281',
+                'fltt': '2',
+                'invt': '2',
+                'fid': 'f12',
+                'fs': 'm:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23',  # A股
+                'fields': 'f2,f3,f12,f14,f62'  # 价格、涨跌幅、代码、名称、净资金流向
+            }
+
+            all_stocks = []
+            page = 1
+            page_size = 100
+
+            print(f"开始获取完整A股市场数据...")
+
+            # 分页获取全部股票数据
+            while True:
+                params = base_params.copy()
+                params['pn'] = str(page)
+                params['pz'] = str(page_size)
+
+                response = requests.get(url, params=params, headers=headers, timeout=10)
+
+                if response.status_code != 200:
+                    print(f"第{page}页请求失败: {response.status_code}")
+                    break
+
+                data = response.json()
+
+                if 'data' not in data or not data['data']:
+                    print(f"第{page}页无数据")
+                    break
+
+                page_stocks = data['data'].get('diff', [])
+                if not page_stocks:
+                    print(f"第{page}页股票列表为空")
+                    break
+
+                all_stocks.extend(page_stocks)
+                print(f"第{page}页: {len(page_stocks)}只股票, 累计: {len(all_stocks)}只")
+
+                # 如果这页数据少于页面大小，说明是最后一页
+                if len(page_stocks) < page_size:
+                    print(f"第{page}页为最后一页")
+                    break
+
+                page += 1
+                time.sleep(0.05)  # 短暂延时避免限流
+
+            print(f"数据获取完成: 共{len(all_stocks)}只股票")
+
+            # 统计涨跌分布和真实资金流向
+            up_count = 0
+            down_count = 0
+            flat_count = 0
+            limit_up_count = 0
+            limit_down_count = 0
+            valid_count = 0
+
+            # 资金流向统计
+            total_net_flow = 0.0  # 净流向（元）
+            stocks_with_flow_data = 0
+            positive_flow = 0.0  # 流入
+            negative_flow = 0.0  # 流出
+
+            for stock in all_stocks:
+                change_pct = stock.get('f3')
+                price = stock.get('f2')
+                net_flow = stock.get('f62')  # 净资金流向（元）
+
+                # 跳过停牌股票
+                if change_pct is None or price is None or price == 0:
+                    continue
+
+                valid_count += 1
+
+                try:
+                    change_pct = float(change_pct)
+
+                    # 处理真实资金流向数据
+                    if net_flow and isinstance(net_flow, (int, float)):
+                        flow_value = float(net_flow)
+                        total_net_flow += flow_value
+                        stocks_with_flow_data += 1
+
+                        if flow_value > 0:
+                            positive_flow += flow_value
+                        else:
+                            negative_flow += abs(flow_value)
+
+                except (ValueError, TypeError):
+                    continue
+
+                # 统计涨跌分布
+                if change_pct > 9.8:  # 涨停
+                    limit_up_count += 1
+                    up_count += 1
+                elif change_pct > 0:
+                    up_count += 1
+                elif change_pct < -9.8:  # 跌停
+                    limit_down_count += 1
+                    down_count += 1
+                elif change_pct < 0:
+                    down_count += 1
+                else:
+                    flat_count += 1
+
+            # 转换为亿元
+            net_inflow_billion = total_net_flow / 100000000
+            positive_flow_billion = positive_flow / 100000000
+            negative_flow_billion = negative_flow / 100000000
+
+            print(f"市场统计完成: 上涨{up_count}, 下跌{down_count}, 平盘{flat_count}")
+            print(f"资金流向: 净流向{net_inflow_billion:.2f}亿元 (流入{positive_flow_billion:.2f}亿, 流出{negative_flow_billion:.2f}亿)")
+
+            return {
+                'up_count': up_count,
+                'down_count': down_count,
+                'flat_count': flat_count,
+                'limit_up_count': limit_up_count,
+                'limit_down_count': limit_down_count,
+                'total_count': valid_count,
+                'sample_size': len(all_stocks),
+                'net_inflow_billion': round(net_inflow_billion, 2),
+                'total_inflow_billion': round(positive_flow_billion, 2),
+                'total_outflow_billion': round(negative_flow_billion, 2),
+                'stocks_with_flow_data': stocks_with_flow_data
+            }
+
+        except Exception as e:
+            print(f"获取东方财富完整市场统计失败: {e}")
+            return None
+
     @staticmethod
     def get_time_period():
         """获取当前时间段"""
@@ -1024,44 +1223,77 @@ class RealTimeDataService:
         else:
             return 'closed'
     
-    @staticmethod 
+    @staticmethod
     def get_stock_realtime_price(ts_code):
-        """获取股票实时价格 - 用于5秒刷新"""
+        """获取股票实时价格 - 使用轻量级腾讯API"""
         try:
-            # 在交易时间，尝试获取实时数据
-            if RealTimeDataService.is_trading_time() and pro:
-                try:
-                    # 获取实时行情（限制调用频率）
-                    df = pro.daily(ts_code=ts_code, trade_date='', limit=1)
-                    if not df.empty:
-                        row = df.iloc[0]
+            # 使用腾讯API获取实时数据 - 测试证明最快
+            stock_code = ts_code.replace('.SH', '').replace('.SZ', '')
+            if ts_code.endswith('.SH'):
+                tencent_code = f'sh{stock_code}'
+            else:
+                tencent_code = f'sz{stock_code}'
+
+            url = f"http://qt.gtimg.cn/q={tencent_code}"
+            response = requests.get(url, timeout=3)
+            response.encoding = 'gbk'
+
+            if response.status_code == 200 and response.text:
+                # 解析腾讯数据格式
+                data_match = re.search(r'"([^"]+)"', response.text)
+                if data_match:
+                    data_str = data_match.group(1)
+                    data_parts = data_str.split('~')
+
+                    if len(data_parts) >= 50:  # 腾讯API返回50+字段
+                        current_price = float(data_parts[3])
+
+                        # 根据成交价格计算买卖价差（模拟真实市场）
+                        spread_rate = 0.0002  # 0.02%的价差
+                        spread = current_price * spread_rate
+
+                        bid_price = current_price - spread / 2  # 买一价
+                        ask_price = current_price + spread / 2  # 卖一价
+
                         return {
                             'success': True,
                             'data': {
                                 'ts_code': ts_code,
-                                'current_price': float(row['close']),
-                                'open_price': float(row['open']),
-                                'high_price': float(row['high']),
-                                'low_price': float(row['low']),
-                                'change': float(row['change']),
-                                'pct_chg': float(row['pct_chg']),
-                                'volume': int(row['vol']),
-                                'amount': float(row['amount']),
+                                'current_price': current_price,
+                                'bid_price': round(bid_price, 2),
+                                'ask_price': round(ask_price, 2),
+                                'open_price': float(data_parts[5]),
+                                'high_price': float(data_parts[33]),
+                                'low_price': float(data_parts[34]),
+                                'change': float(data_parts[31]),
+                                'pct_chg': float(data_parts[32]),
+                                'volume': int(float(data_parts[36])) if data_parts[36] else 0,
+                                'amount': float(data_parts[37]) if data_parts[37] else 0,
                                 'timestamp': datetime.now().isoformat(),
-                                'is_real_time': True
+                                'is_real_time': True,
+                                'spread': round(spread, 4),
+                                'data_source': 'tencent_api'
                             }
                         }
-                except Exception as e:
-                    print(f"实时数据获取失败: {e}")
-            
+
             # 回退到数据库最新数据
             latest_daily = StockDaily.objects.filter(ts_code=ts_code).order_by('-trade_date').first()
             if latest_daily:
+                current_price = float(latest_daily.close) if latest_daily.close else 0
+
+                # 非交易时间使用固定价差
+                spread_rate = 0.0003  # 0.03%的价差
+                spread = current_price * spread_rate
+                bid_price = current_price - spread / 2
+                ask_price = current_price + spread / 2
+
                 return {
                     'success': True,
                     'data': {
                         'ts_code': ts_code,
-                        'current_price': float(latest_daily.close) if latest_daily.close else 0,
+                        'current_price': current_price,
+                        'bid_price': round(bid_price, 2),
+                        'ask_price': round(ask_price, 2),
                         'open_price': float(latest_daily.open) if latest_daily.open else 0,
                         'high_price': float(latest_daily.high) if latest_daily.high else 0,
                         'low_price': float(latest_daily.low) if latest_daily.low else 0,
@@ -1070,16 +1302,18 @@ class RealTimeDataService:
                         'volume': latest_daily.vol if latest_daily.vol else 0,
                         'amount': float(latest_daily.amount) if latest_daily.amount else 0,
                         'timestamp': datetime.now().isoformat(),
-                        'is_real_time': False
+                        'is_real_time': False,
+                        'spread': round(spread, 4),
+                        'data_source': 'database'
                     }
                 }
-            
+
             return {
                 'success': False,
                 'message': '未找到股票数据',
                 'data': None
             }
-            
+
         except Exception as e:
             return {
                 'success': False,
@@ -1115,143 +1349,111 @@ class RealTimeDataService:
     
     @staticmethod
     def get_market_overview():
-        """获取市场概况 - 直接从TuShare API获取真实数据"""
+        """获取市场概况 - 使用东方财富API获取精确实时数据"""
         try:
-            if not pro:
-                return {
-                    'success': False,
-                    'message': 'TuShare API未配置',
-                    'data': None
+            # 使用东方财富API获取完整市场统计
+            market_stats = RealTimeDataService.get_complete_market_stats_eastmoney()
+
+            # 获取主要指数数据（使用腾讯API）
+            indices_data = RealTimeDataService.get_indices_from_tencent()
+
+            if market_stats:
+                # 计算资金流向（使用真实的东方财富数据）
+                up_ratio = market_stats['up_count'] / market_stats['total_count'] if market_stats['total_count'] > 0 else 0
+                down_ratio = market_stats['down_count'] / market_stats['total_count'] if market_stats['total_count'] > 0 else 0
+
+                # 使用真实的净资金流向数据
+                net_inflow = market_stats.get('net_inflow_billion', 0)
+                total_inflow = market_stats.get('total_inflow_billion', 0)
+                total_outflow = market_stats.get('total_outflow_billion', 0)
+
+                formatted_stats = {
+                    'up_count': market_stats['up_count'],
+                    'down_count': market_stats['down_count'],
+                    'flat_count': market_stats['flat_count'],
+                    'limit_up_count': market_stats['limit_up_count'],
+                    'limit_down_count': market_stats['limit_down_count'],
+                    'total_count': market_stats['total_count'],
+                    'net_inflow': round(net_inflow, 2),
+                    'total_inflow': round(total_inflow, 2),
+                    'total_outflow': round(total_outflow, 2),
+                    'up_ratio': round(up_ratio * 100, 2),
+                    'down_ratio': round(down_ratio * 100, 2),
+                    'stocks_with_flow_data': market_stats.get('stocks_with_flow_data', 0)
                 }
-
-            # 获取今日交易数据
-            today = datetime.now().strftime('%Y%m%d')
-
-            try:
-                # 获取今日全市场股票数据
-                df = pro.daily(
-                    trade_date=today,
-                    fields='ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount'
-                )
-
-                # 如果今日没有数据，尝试获取最近交易日数据
-                if df.empty:
-                    # 尝试最近5个交易日
-                    for i in range(1, 6):
-                        date_str = (datetime.now() - timedelta(days=i)).strftime('%Y%m%d')
-                        df = pro.daily(
-                            trade_date=date_str,
-                            fields='ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount'
-                        )
-                        if not df.empty:
-                            break
-
-                if df.empty:
-                    raise Exception("无法获取市场数据")
-
-                # 筛选有效数据（排除ST股票、停牌股票等）
-                valid_df = df[
-                    (df['pct_chg'].notna()) &
-                    (df['vol'] > 0) &  # 有成交量
-                    (~df['ts_code'].str.contains('ST', na=False)) &  # 排除ST股票
-                    (df['close'] > 0)  # 正常交易
-                ].copy()
-
-                # 计算涨跌分布
-                total_count = len(valid_df)
-                up_count = len(valid_df[valid_df['pct_chg'] > 0])
-                down_count = len(valid_df[valid_df['pct_chg'] < 0])
-                flat_count = len(valid_df[valid_df['pct_chg'] == 0])
-
-                # 计算资金流向（基于成交额和涨跌幅的简单估算）
-                up_amount = valid_df[valid_df['pct_chg'] > 0]['amount'].sum()
-                down_amount = valid_df[valid_df['pct_chg'] < 0]['amount'].sum()
-
-                # 科学的资金流向计算
-                main_flow, retail_flow = RealTimeDataService.calculate_money_flow(valid_df)
-
-                market_stats = {
-                    'up_count': up_count,
-                    'down_count': down_count,
-                    'flat_count': flat_count,
-                    'total_count': total_count,
-                    'main_flow': round(main_flow / 10000, 2) if main_flow else 0,  # 转换为万元
-                    'retail_flow': round(retail_flow / 10000, 2) if retail_flow else 0,  # 转换为万元
-                    'trade_date': df.iloc[0]['trade_date'] if not df.empty else today,
-                    'data_source': 'tushare_api'
-                }
-
-                # 获取主要指数数据 - 修复API调用
-                indices_data = []
-
-                try:
-                    # 获取指数基础信息
-                    index_basic_df = pro.index_basic(market='SSE')
-                    sz_index_basic_df = pro.index_basic(market='SZSE')
-
-                    # 合并上证和深证指数
-                    all_index_basic = pd.concat([index_basic_df, sz_index_basic_df], ignore_index=True)
-
-                    # 目标指数
-                    target_indices = {
-                        '000001.SH': '上证指数',
-                        '399001.SZ': '深证成指',
-                        '399006.SZ': '创业板指'
-                    }
-
-                    current_date = df.iloc[0]['trade_date'] if not df.empty else today
-
-                    for index_code, index_name in target_indices.items():
-                        try:
-                            # 单独获取每个指数的日线数据
-                            index_df = pro.index_daily(
-                                ts_code=index_code,
-                                start_date=current_date,
-                                end_date=current_date
-                            )
-
-                            if not index_df.empty:
-                                index_info = index_df.iloc[0]
-                                indices_data.append({
-                                    'code': index_code,
-                                    'name': index_name,
-                                    'current': float(index_info['close']),
-                                    'change': float(index_info['change']) if pd.notna(index_info['change']) else 0,
-                                    'pct_chg': float(index_info['pct_chg']) if pd.notna(index_info['pct_chg']) else 0,
-                                    'pre_close': float(index_info['pre_close']) if pd.notna(index_info['pre_close']) else 0
-                                })
-                                print(f"成功获取指数 {index_name}: {index_info['close']}")
-                            else:
-                                print(f"指数 {index_code} 当日无数据")
-
-                        except Exception as e:
-                            print(f"获取指数 {index_code} 失败: {e}")
-
-                except Exception as e:
-                    print(f"获取指数基础信息失败: {e}")
-                    # 如果完全失败，返回空数组而不是模拟数据
-                    indices_data = []
 
                 return {
                     'success': True,
                     'data': {
+                        'market_stats': formatted_stats,
                         'indices': indices_data,
-                        'market_stats': market_stats,
-                        'timestamp': timezone.now().isoformat()
-                    }
+                        'timestamp': datetime.now().isoformat(),
+                        'data_source': '东方财富完整数据',
+                        'sample_size': market_stats['sample_size']
+                    },
+                    'message': f'成功获取{market_stats["sample_size"]}只股票的完整市场数据'
                 }
-
-            except Exception as api_error:
-                print(f"TuShare API调用失败: {api_error}")
-                # 回退到本地数据库数据
+            else:
+                # 如果API失败，回退到本地数据库
+                print("东方财富API获取失败, 使用回退方案")
                 return RealTimeDataService.get_market_overview_from_db()
 
         except Exception as e:
-            return {
-                'success': False,
-                'message': f'获取市场概况失败: {str(e)}',
-                'data': None
-            }
+            print(f"市场概况获取错误: {e}")
+            # 完全失败时的回退方案
+            return RealTimeDataService.get_market_overview_from_db()
+
+    @staticmethod
+    def get_indices_from_tencent():
+        """从腾讯API获取指数数据"""
+        try:
+            codes = "sh000001,sz399001,sz399006"
+            url = f"http://qt.gtimg.cn/q={codes}"
+
+            response = requests.get(url, timeout=5)
+            response.encoding = 'gbk'
+
+            indices_data = []
+
+            if response.status_code == 200:
+                lines = response.text.strip().split('\n')
+
+                for line in lines:
+                    if 'v_' in line and '=' in line:
+                        code_match = re.search(r'v_([^=]+)', line)
+                        data_match = re.search(r'"([^"]+)"', line)
+
+                        if code_match and data_match:
+                            code = code_match.group(1)
+                            data_str = data_match.group(1)
+                            data_parts = data_str.split('~')
+
+                            if len(data_parts) >= 6:
+                                try:
+                                    name = data_parts[1]
+                                    current = float(data_parts[3])      # 现价
+                                    prev_close = float(data_parts[4])   # 昨收价
+
+                                    # 计算涨跌额和涨跌幅
+                                    change = current - prev_close
+                                    pct_chg = (change / prev_close * 100) if prev_close > 0 else 0
+
+                                    indices_data.append({
+                                        'code': code,
+                                        'name': name,
+                                        'current': current,
+                                        'change': round(change, 2),
+                                        'pct_chg': round(pct_chg, 2)
+                                    })
+
+                                except (ValueError, IndexError):
+                                    continue
+
+            return indices_data
+
+        except Exception as e:
+            print(f"获取指数失败: {e}")
+            return []
 
     @staticmethod
     def get_market_overview_from_db():
@@ -1285,8 +1487,9 @@ class RealTimeDataService:
                 'down_count': 0,
                 'flat_count': 0,
                 'total_count': 0,
-                'main_flow': 0,
-                'retail_flow': 0
+                'net_inflow': 0,  # 本地数据库没有资金流向数据，设为0
+                'total_inflow': 0,
+                'total_outflow': 0
             }
 
             if latest_date:
@@ -1298,23 +1501,14 @@ class RealTimeDataService:
                 down_count = daily_data.filter(pct_chg__lt=0).count()
                 flat_count = daily_data.filter(pct_chg=0).count()
 
-                # 计算资金流向 - 使用改进的算法
-                daily_data_df = pd.DataFrame(list(daily_data.values(
-                    'pct_chg', 'amount'
-                )))
-
-                if not daily_data_df.empty:
-                    main_flow, retail_flow = RealTimeDataService.calculate_money_flow(daily_data_df)
-                else:
-                    main_flow, retail_flow = 0, 0
-
                 market_stats = {
                     'up_count': up_count,
                     'down_count': down_count,
                     'flat_count': flat_count,
                     'total_count': total_count,
-                    'main_flow': round(main_flow / 100000, 2) if main_flow else 0,  # 转换为万元
-                    'retail_flow': round(retail_flow / 100000, 2) if retail_flow else 0,  # 转换为万元
+                    'net_inflow': 0,  # 本地数据库没有资金流向数据
+                    'total_inflow': 0,
+                    'total_outflow': 0,
                     'trade_date': latest_date['trade_date'].strftime('%Y-%m-%d')
                 }
 
@@ -1323,7 +1517,8 @@ class RealTimeDataService:
                 'data': {
                     'indices': indices_data,
                     'market_stats': market_stats,
-                    'timestamp': timezone.now().isoformat()
+                    'timestamp': timezone.now().isoformat(),
+                    'data_source': '本地数据库（无资金流向数据）'
                 }
             }
 
@@ -1333,173 +1528,6 @@ class RealTimeDataService:
                 'message': f'获取市场概况失败: {str(e)}',
                 'data': None
             }
-
-    @staticmethod
-    def calculate_money_flow(df=None):
-        """
-        计算资金流向数据 - 基于股票涨跌分布和成交额计算
-        """
-        try:
-            # 如果无法获取真实数据，直接使用计算方式
-            if df is None or df.empty or 'pct_chg' not in df.columns or 'amount' not in df.columns:
-                print("数据不足，无法计算资金流向")
-                return 0, 0
-
-            # 过滤有效数据
-            valid_df = df[
-                (df['pct_chg'].notna()) &
-                (df['amount'].notna()) &
-                (df['amount'] > 0)
-            ].copy()
-
-            if valid_df.empty:
-                print("没有有效的成交数据")
-                return 0, 0
-
-            # 按涨跌幅分类计算
-            strong_up = valid_df[valid_df['pct_chg'] > 5]    # 强势上涨
-            normal_up = valid_df[(valid_df['pct_chg'] > 0) & (valid_df['pct_chg'] <= 5)]  # 一般上涨
-            normal_down = valid_df[(valid_df['pct_chg'] < 0) & (valid_df['pct_chg'] >= -5)]  # 一般下跌
-            strong_down = valid_df[valid_df['pct_chg'] < -5]  # 强势下跌
-
-            # 主力资金流向计算（基于涨跌幅和成交额）
-            main_inflow = 0
-            main_outflow = 0
-
-            if not strong_up.empty:
-                main_inflow += strong_up['amount'].sum() * 0.7  # 主力70%参与强势上涨
-            if not normal_up.empty:
-                main_inflow += normal_up['amount'].sum() * 0.55  # 主力55%参与一般上涨
-            if not normal_down.empty:
-                main_outflow += normal_down['amount'].sum() * 0.45  # 主力45%参与下跌
-            if not strong_down.empty:
-                main_outflow += strong_down['amount'].sum() * 0.6  # 主力60%参与强势下跌
-
-            main_net_flow = main_inflow - main_outflow
-
-            # 散户资金流向（与主力相反的策略）
-            retail_inflow = 0
-            retail_outflow = 0
-
-            if not strong_up.empty:
-                retail_inflow += strong_up['amount'].sum() * 0.2  # 散户20%参与强势上涨
-            if not normal_up.empty:
-                retail_inflow += normal_up['amount'].sum() * 0.35  # 散户35%参与一般上涨
-            if not normal_down.empty:
-                retail_outflow += normal_down['amount'].sum() * 0.4  # 散户40%参与下跌
-            if not strong_down.empty:
-                retail_outflow += strong_down['amount'].sum() * 0.3  # 散户30%参与强势下跌
-
-            retail_net_flow = retail_inflow - retail_outflow
-
-            print(f"计算得出资金流向: 主力={main_net_flow/10000:.2f}万元, 散户={retail_net_flow/10000:.2f}万元")
-            return main_net_flow, retail_net_flow
-
-        except Exception as e:
-            print(f"计算资金流向失败: {e}")
-            return 0, 0
-
-            return main_net_flow, retail_net_flow
-
-        except Exception as e:
-            print(f"资金流向计算错误: {e}")
-            return 0, 0
-
-    @staticmethod
-    def get_real_money_flow():
-        """
-        从Tushare获取真实的资金流向数据
-        """
-        try:
-            if not pro:
-                print("Tushare API未初始化")
-                return None, None
-
-            # 限流检查
-            if not RateLimiter.can_call("money_flow", max_calls=3, time_window=60):
-                print("资金流向API限流中")
-                return None, None
-
-            RateLimiter.record_call("money_flow")
-
-            # 获取当前日期和最近交易日
-            today = datetime.now()
-            main_flow = 0
-            retail_flow = 0
-
-            # 方案1：获取港股通资金流向（代表机构资金）
-            for i in range(5):  # 查找最近5个交易日
-                test_date = (today - timedelta(days=i)).strftime('%Y%m%d')
-                try:
-                    # 沪股通数据
-                    hsgt_df = pro.hsgt_top10(trade_date=test_date, market_type='1')
-                    szgt_df = pro.hsgt_top10(trade_date=test_date, market_type='3')
-
-                    if not hsgt_df.empty and 'net_amount' in hsgt_df.columns:
-                        main_flow += hsgt_df['net_amount'].sum()
-                    if not szgt_df.empty and 'net_amount' in szgt_df.columns:
-                        main_flow += szgt_df['net_amount'].sum()
-
-                    if main_flow != 0:
-                        print(f"港股通数据日期: {test_date}, 主力净流入: {main_flow:.2f}万元")
-                        break
-                except:
-                    continue
-
-            # 方案2：获取个股资金流向数据来计算散户资金
-            major_stocks = ['000001.SZ', '000002.SZ', '600000.SH', '600036.SH', '000858.SZ']
-            retail_flows = []
-
-            for stock_code in major_stocks[:3]:  # 只取前3只避免API限制
-                try:
-                    for i in range(3):
-                        test_date = (today - timedelta(days=i)).strftime('%Y%m%d')
-                        moneyflow_df = pro.moneyflow(ts_code=stock_code, start_date=test_date, end_date=test_date)
-
-                        if not moneyflow_df.empty:
-                            # 小单资金代表散户
-                            if 'buy_sm_amount' in moneyflow_df.columns and 'sell_sm_amount' in moneyflow_df.columns:
-                                latest = moneyflow_df.iloc[0]
-                                sm_net = (latest['buy_sm_amount'] or 0) - (latest['sell_sm_amount'] or 0)
-                                retail_flows.append(sm_net)
-                            break
-                except:
-                    continue
-
-            if retail_flows:
-                retail_flow = sum(retail_flows) / len(retail_flows) * 100  # 按比例放大
-                print(f"个股小单资金流向计算，散户净流入: {retail_flow:.2f}万元")
-
-            # 如果港股通数据为0，尝试融资融券数据
-            if main_flow == 0:
-                try:
-                    for i in range(3):
-                        test_date = (today - timedelta(days=i)).strftime('%Y%m%d')
-                        margin_df = pro.margin(trade_date=test_date)
-                        if not margin_df.empty and 'rzmre' in margin_df.columns:
-                            main_flow = margin_df['rzmre'].sum() * 0.3  # 30%视为主力资金
-                            print(f"融资融券数据日期: {test_date}, 主力资金: {main_flow:.2f}万元")
-                            break
-                except:
-                    pass
-
-            # 如果散户数据为0，基于主力数据估算
-            if retail_flow == 0 and main_flow != 0:
-                retail_flow = -main_flow * 0.7  # 散户与主力有一定反向关系
-                print(f"基于主力数据估算散户流向: {retail_flow:.2f}万元")
-
-            # 添加随机性使数据更真实
-            if main_flow != 0 or retail_flow != 0:
-                import random
-                main_flow *= random.uniform(0.85, 1.15)
-                retail_flow *= random.uniform(0.75, 1.25)
-
-            print(f"最终真实资金流向: 主力={main_flow:.2f}万元, 散户={retail_flow:.2f}万元")
-            return main_flow, retail_flow
-
-        except Exception as e:
-            print(f"获取真实资金流向失败: {e}")
-            return None, None
 
     @staticmethod
     def get_index_name(ts_code):

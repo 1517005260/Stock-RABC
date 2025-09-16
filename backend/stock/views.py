@@ -625,26 +625,105 @@ def stock_realtime_price(request, ts_code):
 
 @require_login
 def market_overview(request):
-    """获取市场概况 - 所有用户可访问"""
+    """获取市场概况 - 使用Redis缓存优化性能"""
     try:
-        result = RealTimeDataService.get_market_overview()
-        
+        from stock.redis_cache import MarketDataCache
+
+        # 从Redis缓存获取市场数据
+        result = MarketDataCache.get_market_data()
+
         if result['success']:
             return JsonResponse({
                 'code': 200,
-                'msg': '获取成功',
-                'data': result['data']
+                'msg': result['message'],
+                'data': result['data'],
+                'meta': {
+                    'is_cached': result.get('is_cached', False),
+                    'cache_time': result.get('cache_time'),
+                    'fetch_duration': result.get('fetch_duration')
+                }
             })
         else:
+            # 如果缓存服务失败，返回错误信息
             return JsonResponse({
                 'code': 500,
-                'msg': result['message']
+                'msg': result['message'],
+                'data': result['data'],
+                'meta': {
+                    'is_cached': False,
+                    'error': True
+                }
             })
-            
+
+    except Exception as e:
+        print(f"市场概况API异常: {e}")
+        return JsonResponse({
+            'code': 500,
+            'msg': f'获取市场概况失败: {str(e)}',
+            'data': {
+                'market_stats': {
+                    'up_count': 0,
+                    'down_count': 0,
+                    'flat_count': 0,
+                    'net_inflow': 0,
+                    'total_inflow': 0,
+                    'total_outflow': 0
+                },
+                'indices': [],
+                'timestamp': '',
+                'data_source': '异常回退'
+            },
+            'meta': {
+                'is_cached': False,
+                'error': True
+            }
+        })
+
+
+@require_login
+def refresh_market_cache(request):
+    """强制刷新市场数据缓存"""
+    try:
+        from stock.redis_cache import MarketDataCache
+
+        result = MarketDataCache.force_refresh()
+
+        return JsonResponse({
+            'code': 200 if result['success'] else 500,
+            'msg': f"缓存刷新{'成功' if result['success'] else '失败'}: {result['message']}",
+            'data': {
+                'success': result['success'],
+                'fetch_duration': result.get('fetch_duration', 0),
+                'cache_time': result.get('cache_time'),
+                'sample_size': result['data'].get('sample_size', 0) if result.get('data') else 0
+            }
+        })
+
     except Exception as e:
         return JsonResponse({
             'code': 500,
-            'msg': f'获取市场概况失败: {str(e)}'
+            'msg': f'刷新缓存失败: {str(e)}'
+        })
+
+
+@require_login
+def cache_status(request):
+    """获取缓存状态信息"""
+    try:
+        from stock.redis_cache import MarketDataCache
+
+        cache_info = MarketDataCache.get_cache_info()
+
+        return JsonResponse({
+            'code': 200,
+            'msg': '获取缓存状态成功',
+            'data': cache_info
+        })
+
+    except Exception as e:
+        return JsonResponse({
+            'code': 500,
+            'msg': f'获取缓存状态失败: {str(e)}'
         })
 
 
@@ -1642,42 +1721,55 @@ def get_kline_data(request, ts_code):
 @require_login
 def get_realtime_data(request, ts_code):
     """
-    获取股票实时数据
+    获取股票实时数据 - 使用RealTimeDataService
     """
     try:
-        realtime_data = enterprise_finance_service.get_realtime_data(ts_code)
-        
-        if not realtime_data:
+        # 使用RealTimeDataService获取实时数据
+        realtime_data = RealTimeDataService.get_stock_realtime_price(ts_code)
+
+        if not realtime_data or not realtime_data.get('success'):
             return JsonResponse({
                 'code': 404,
-                'msg': '暂无实时数据'
+                'msg': f'暂无{ts_code}的实时数据，请检查股票代码是否正确'
             })
-        
+
+        data = realtime_data['data']
+
         # 计算涨跌额和涨跌幅
-        current_price = realtime_data['price']
-        pre_close = realtime_data['pre_close']
-        change = current_price - pre_close
-        pct_change = (change / pre_close) * 100 if pre_close > 0 else 0
-        
+        current_price = data.get('current', 0)
+        prev_close = data.get('prev_close', 0)
+
+        if prev_close > 0:
+            change = current_price - prev_close
+            pct_change = (change / prev_close) * 100
+        else:
+            change = 0
+            pct_change = 0
+
+        response_data = {
+            'ts_code': ts_code,
+            'name': data.get('name', ''),
+            'current': data.get('current_price', 0),
+            'prev_close': data.get('prev_close', 0),
+            'open': data.get('open_price', 0),
+            'high': data.get('high_price', 0),
+            'low': data.get('low_price', 0),
+            'volume': data.get('volume', 0),
+            'amount': data.get('amount', 0),
+            'change': data.get('change', 0),
+            'pct_change': data.get('pct_chg', 0),
+            'update_time': data.get('timestamp', ''),
+            'data_source': realtime_data.get('data_source', 'unknown')
+        }
+
         return JsonResponse({
             'code': 200,
             'msg': '获取成功',
-            'data': {
-                'ts_code': ts_code,
-                'current_price': current_price,
-                'open': realtime_data['open'],
-                'high': realtime_data['high'],
-                'low': realtime_data['low'],
-                'pre_close': pre_close,
-                'change': round(change, 2),
-                'pct_change': round(pct_change, 2),
-                'volume': realtime_data['volume'],
-                'amount': realtime_data['amount'],
-                'update_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            }
+            'data': response_data
         })
-        
+
     except Exception as e:
+        logger.error(f"获取{ts_code}实时数据异常: {e}")
         return JsonResponse({
             'code': 500,
             'msg': f'获取实时数据失败: {str(e)}'
@@ -1691,19 +1783,22 @@ def get_intraday_chart(request, ts_code):
     """
     try:
         result = IntradayDataService.get_stock_intraday_multi_source(ts_code)
-        
+
         if result['success']:
             return JsonResponse({
                 'code': 200,
                 'msg': f'获取成功 (数据源: {result.get("source", "unknown")})',
-                'data': result['data']
+                'data': result['data'],
+                'date': result.get('date'),
+                'source': result.get('source'),
+                'count': result.get('count', 0)
             })
         else:
             return JsonResponse({
                 'code': 404,
                 'msg': result['message']
             })
-        
+
     except Exception as e:
         return JsonResponse({
             'code': 500,
