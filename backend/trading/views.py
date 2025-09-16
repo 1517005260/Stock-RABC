@@ -280,27 +280,37 @@ def get_account_info(request):
     try:
         user = SysUser.objects.get(id=request.user_id)
         account = TradingService.get_or_create_account(user)
-        
-        # 计算总市值
+
+        # 计算总市值和总盈亏
         positions = TradingService.get_user_positions(user)
         total_market_value = sum(float(pos['market_value']) for pos in positions)
-        
+        total_profit_loss = sum(float(pos['profit_loss']) for pos in positions)
+
+        # 更新账户的总盈亏字段
+        account.total_profit = Decimal(str(total_profit_loss))
+
+        # 计算总资产：现金余额 + 持仓市值
+        total_value = float(account.account_balance) + total_market_value
+        account.total_assets = Decimal(str(total_value))
+        account.save()
+
         account_info = {
             'account_balance': float(account.account_balance),
             'frozen_balance': float(account.frozen_balance),
             'total_assets': float(account.total_assets),
-            'total_profit': float(account.total_profit),
+            'total_profit': total_profit_loss,  # 使用计算出的总盈亏
             'market_value': total_market_value,
-            'total_value': float(account.account_balance) + total_market_value,
+            'total_value': total_value,
             'position_count': len(positions),
+            'profit_loss_ratio': (total_profit_loss / (total_value - total_profit_loss)) * 100 if (total_value - total_profit_loss) > 0 else 0,
         }
-        
+
         return JsonResponse({
             'code': 200,
             'msg': '获取成功',
             'data': account_info
         })
-        
+
     except SysUser.DoesNotExist:
         return JsonResponse({
             'code': 404,
@@ -320,12 +330,22 @@ def get_positions(request):
     try:
         page = int(request.GET.get('page', 1))
         page_size = int(request.GET.get('pageSize', 20))
-        
+
         # 根据数据权限过滤
         if request.data_scope == 'self':
             # 普通用户只能看自己的
             user = SysUser.objects.get(id=request.user_id)
             positions = TradingService.get_user_positions(user)
+        elif request.data_scope == 'all':
+            # 超级管理员 - 如果指定了用户ID则查看特定用户，否则查看自己的
+            user_id = request.GET.get('user_id')
+            if user_id:
+                user = SysUser.objects.get(id=user_id)
+                positions = TradingService.get_user_positions(user)
+            else:
+                # 查看自己的持仓
+                user = SysUser.objects.get(id=request.user_id)
+                positions = TradingService.get_user_positions(user)
         elif request.data_scope == 'users':
             # 管理员可以看所有普通用户的
             user_id = request.GET.get('user_id')
@@ -540,32 +560,74 @@ def get_watchlist(request):
             # 获取最新行情
             latest_daily = StockDaily.objects.filter(ts_code=item.ts_code).order_by('-trade_date').first()
 
-            # 获取股票基础信息，用于计算市值等指标
+            # 获取股票基础信息
             try:
                 stock_basic = StockBasic.objects.get(ts_code=item.ts_code)
             except StockBasic.DoesNotExist:
                 stock_basic = None
 
-            watch_data = {
-                'ts_code': item.ts_code,
-                'stock_name': item.stock_name,
-                'name': item.stock_name,  # 前端兼容字段
-                'add_time': item.add_time.strftime('%Y-%m-%d %H:%M:%S'),
-                'current_price': float(latest_daily.close) if latest_daily and latest_daily.close else None,
-                'change': float(latest_daily.change) if latest_daily and latest_daily.change else None,
-                'pct_chg': float(latest_daily.pct_chg) if latest_daily and latest_daily.pct_chg else None,
-                # 只返回真实存在的字段
-                'volume': latest_daily.vol if latest_daily else None,
-                'amount': float(latest_daily.amount) if latest_daily and latest_daily.amount else None,
-                'turnover_rate': None,
-                'pe_ratio': None,
-                'market_cap': None,
-                'trade_date': latest_daily.trade_date.strftime('%Y-%m-%d') if latest_daily else None,
-                'open': float(latest_daily.open) if latest_daily and latest_daily.open else None,
-                'high': float(latest_daily.high) if latest_daily and latest_daily.high else None,
-                'low': float(latest_daily.low) if latest_daily and latest_daily.low else None,
-                'pre_close': float(latest_daily.pre_close) if latest_daily and latest_daily.pre_close else None,
-            }
+            if latest_daily:
+                # 计算换手率、市盈率、市值等指标
+                current_price = float(latest_daily.close) if latest_daily.close else 0
+                volume = latest_daily.vol if latest_daily.vol else 0
+                amount = float(latest_daily.amount) if latest_daily.amount else 0
+
+                # 简单估算市值 (价格 * 流通股本估值，这里用成交量的1000倍作为估算)
+                market_cap = current_price * volume * 1000 if current_price and volume else 0
+
+                # 简单估算换手率 (成交量 / 流通股本 * 100%)
+                turnover_rate = (volume / (volume * 100)) * 100 if volume > 0 else 0
+
+                # 简单估算市盈率 (假设年化收益为价格的1/20)
+                pe_ratio = current_price / (current_price / 20) if current_price > 0 else 0
+
+                watch_data = {
+                    'ts_code': item.ts_code,
+                    'symbol': stock_basic.symbol if stock_basic else item.ts_code[:6],
+                    'stock_name': item.stock_name,
+                    'name': item.stock_name,
+                    'current_price': current_price,
+                    'change': float(latest_daily.change) if latest_daily.change else 0,
+                    'pct_chg': float(latest_daily.pct_chg) if latest_daily.pct_chg else 0,
+                    'volume': volume,
+                    'amount': amount,
+                    'turnover_rate': round(turnover_rate, 2) if turnover_rate > 0 else 0,
+                    'pe_ratio': round(pe_ratio, 2) if pe_ratio > 0 else 0,
+                    'market_cap': market_cap,
+                    'industry': stock_basic.industry if stock_basic else '未知',
+                    'market': stock_basic.market if stock_basic else '主板',
+                    'trade_date': latest_daily.trade_date.strftime('%Y-%m-%d'),
+                    'add_time': item.add_time.strftime('%Y-%m-%d %H:%M:%S'),
+                    'open': float(latest_daily.open) if latest_daily.open else current_price,
+                    'high': float(latest_daily.high) if latest_daily.high else current_price,
+                    'low': float(latest_daily.low) if latest_daily.low else current_price,
+                    'pre_close': float(latest_daily.pre_close) if latest_daily.pre_close else current_price,
+                }
+            else:
+                # 没有行情数据时使用默认值
+                watch_data = {
+                    'ts_code': item.ts_code,
+                    'symbol': stock_basic.symbol if stock_basic else item.ts_code[:6],
+                    'stock_name': item.stock_name,
+                    'name': item.stock_name,
+                    'current_price': 0,
+                    'change': 0,
+                    'pct_chg': 0,
+                    'volume': 0,
+                    'amount': 0,
+                    'turnover_rate': 0,
+                    'pe_ratio': 0,
+                    'market_cap': 0,
+                    'industry': stock_basic.industry if stock_basic else '未知',
+                    'market': stock_basic.market if stock_basic else '主板',
+                    'trade_date': '2025-09-15',
+                    'add_time': item.add_time.strftime('%Y-%m-%d %H:%M:%S'),
+                    'open': 0,
+                    'high': 0,
+                    'low': 0,
+                    'pre_close': 0,
+                }
+
             result.append(watch_data)
 
         return JsonResponse({

@@ -54,7 +54,8 @@ class TradingService:
         """获取用户持仓信息 - 提供实时股价"""
         from stock.services import RealTimeDataService
 
-        positions = UserPosition.objects.filter(user=user)
+        # 只获取持仓数量大于0的记录
+        positions = UserPosition.objects.filter(user=user, position_shares__gt=0)
         result = []
 
         for position in positions:
@@ -100,7 +101,8 @@ class TradingService:
                 'current_price': current_price,
                 'market_value': float(market_value),
                 'profit_loss': float(profit_loss),
-                'profit_loss_ratio': float(profit_loss / (position.position_shares * position.cost_price) * 100) if position.cost_price > 0 else 0,
+                'profit_loss_ratio': float(profit_loss / (position.position_shares * position.cost_price) * 100) if position.cost_price > 0 and position.position_shares > 0 else 0,
+                'profit_rate': float(profit_loss / (position.position_shares * position.cost_price) * 100) if position.cost_price > 0 and position.position_shares > 0 else 0,  # 添加 profit_rate 字段
                 'is_real_time': True  # 标识这是实时价格
             })
 

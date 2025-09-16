@@ -608,7 +608,86 @@ class GrantRole(UserManagementView):
 
 class SearchView(UserManagementView):
     """用户搜索视图 - 兼容性"""
+    def post(self, request):
+        """处理前端的 POST 请求"""
+        try:
+            data = json.loads(request.body.decode("utf-8"))
+
+            # 检查管理员权限
+            current_user_id = getattr(request, 'user_id', None)
+            if not self._is_admin_or_above(current_user_id):
+                return JsonResponse({'code': 403, 'msg': '权限不足'})
+
+            # 获取查询参数
+            query = data.get('query', '').strip()
+            page_num = data.get('pageNum', 1)
+            page_size = data.get('pageSize', 10)
+
+            # 查询用户
+            users_query = SysUser.objects.all()
+
+            # 如果有搜索关键词，进行模糊搜索
+            if query:
+                from django.db.models import Q
+                users_query = users_query.filter(
+                    Q(username__icontains=query) |
+                    Q(email__icontains=query) |
+                    Q(phonenumber__icontains=query)
+                )
+
+            total = users_query.count()
+
+            # 分页
+            start = (page_num - 1) * page_size
+            end = start + page_size
+            users = users_query[start:end]
+
+            # 构建用户列表数据
+            user_list = []
+            for user in users:
+                # 获取用户角色 - 添加异常处理
+                role_list = []
+                try:
+                    roles = SysRole.objects.raw(
+                        "SELECT id, name, code FROM sys_role WHERE id IN "
+                        "(SELECT role_id FROM sys_user_role WHERE user_id=%s)",
+                        [user.id]
+                    )
+                    role_list = [{'id': role.id, 'name': role.name, 'code': role.code} for role in roles]
+                except Exception as e:
+                    print(f"获取用户 {user.id} 角色失败: {e}")
+                    role_list = []
+
+                user_data = {
+                    'id': user.id,
+                    'username': user.username,
+                    'email': user.email or '',
+                    'phonenumber': user.phonenumber or '',
+                    'status': user.status,
+                    'avatar': user.avatar or 'default.jpg',
+                    'create_time': user.create_time.strftime('%Y-%m-%d %H:%M:%S') if user.create_time else '',
+                    'login_date': user.login_date.strftime('%Y-%m-%d %H:%M:%S') if hasattr(user, 'login_date') and user.login_date else '',
+                    'remark': getattr(user, 'remark', '') or '',
+                    'roleList': role_list
+                }
+                user_list.append(user_data)
+
+            return JsonResponse({
+                'code': 200,
+                'msg': '查询成功',
+                'data': {
+                    'userList': user_list,
+                    'total': total,
+                    'pageNum': page_num,
+                    'pageSize': page_size
+                }
+            })
+
+        except Exception as e:
+            return JsonResponse({'code': 500, 'msg': f'查询用户失败: {str(e)}'})
+
     def get(self, request):
+        """保留原有的 GET 请求处理逻辑"""
         request.GET = request.GET.copy()
         request.GET['action'] = 'list'
         return super().get(request)

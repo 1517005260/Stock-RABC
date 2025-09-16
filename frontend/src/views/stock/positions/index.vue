@@ -60,7 +60,9 @@
               'text-danger': scope.row.profit_loss < 0,
               'text-muted': scope.row.profit_loss === 0
             }">
-              {{ scope.row.profit_loss > 0 ? '+' : '' }}{{ scope.row.profit_loss?.toFixed(2) || '--' }}
+              {{ scope.row.profit_loss !== undefined && scope.row.profit_loss !== null ?
+                  (scope.row.profit_loss > 0 ? '+' : '') + scope.row.profit_loss.toFixed(2) :
+                  '--' }}
             </span>
           </template>
         </el-table-column>
@@ -71,7 +73,9 @@
               'text-danger': scope.row.profit_rate < 0,
               'text-muted': scope.row.profit_rate === 0
             }">
-              {{ scope.row.profit_rate > 0 ? '+' : '' }}{{ scope.row.profit_rate?.toFixed(2) || '--' }}%
+              {{ scope.row.profit_rate !== undefined && scope.row.profit_rate !== null ?
+                  (scope.row.profit_rate > 0 ? '+' : '') + scope.row.profit_rate.toFixed(2) + '%' :
+                  '--' }}
             </span>
           </template>
         </el-table-column>
@@ -383,11 +387,11 @@ export default {
 }
 
 .text-success {
-  color: #67c23a;
+  color: #f56c6c; /* A股红涨 */
 }
 
 .text-danger {
-  color: #f56c6c;
+  color: #67c23a; /* A股绿跌 */
 }
 
 .text-muted {

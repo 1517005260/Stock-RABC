@@ -360,37 +360,214 @@ export default {
     },
     
     updateTradeChart() {
-      if (!this.tradeChartInstance || !this.recentTrades.length) return
-      
-      // 简化的交易趋势图
-      const dates = this.recentTrades.map(trade => {
+      if (!this.tradeChartInstance || !this.recentTrades.length) {
+        // 如果没有数据，显示空图表
+        const emptyOption = {
+          title: {
+            text: '暂无交易数据',
+            subtext: '完成交易后将显示趋势',
+            left: 'center',
+            top: 'center',
+            textStyle: {
+              color: '#999',
+              fontSize: 14
+            },
+            subtextStyle: {
+              color: '#ccc',
+              fontSize: 12
+            }
+          }
+        }
+        this.tradeChartInstance.setOption(emptyOption)
+        return
+      }
+
+      // 按日期分组交易数据
+      const tradesByDate = {}
+      const buyAmountsByDate = {}
+      const sellAmountsByDate = {}
+
+      this.recentTrades.forEach(trade => {
         const date = new Date(trade.trade_time)
-        return `${date.getMonth() + 1}/${date.getDate()}`
-      }).reverse()
-      
-      const amounts = this.recentTrades.map(trade => trade.trade_amount).reverse()
-      
+        const dateStr = `${date.getMonth() + 1}/${date.getDate()}`
+
+        if (!tradesByDate[dateStr]) {
+          tradesByDate[dateStr] = 0
+          buyAmountsByDate[dateStr] = 0
+          sellAmountsByDate[dateStr] = 0
+        }
+
+        tradesByDate[dateStr] += trade.trade_amount
+
+        if (trade.trade_type === 'BUY') {
+          buyAmountsByDate[dateStr] += trade.trade_amount
+        } else if (trade.trade_type === 'SELL') {
+          sellAmountsByDate[dateStr] += trade.trade_amount
+        }
+      })
+
+      const dates = Object.keys(tradesByDate).sort()
+      const buyAmounts = dates.map(date => buyAmountsByDate[date] || 0)
+      const sellAmounts = dates.map(date => sellAmountsByDate[date] || 0)
+      const totalAmounts = dates.map(date => tradesByDate[date] || 0)
+
       const option = {
+        title: {
+          text: '交易金额趋势',
+          left: 'left',
+          textStyle: {
+            fontSize: 14,
+            fontWeight: 'normal'
+          }
+        },
         tooltip: {
-          trigger: 'axis'
+          trigger: 'axis',
+          axisPointer: {
+            type: 'cross',
+            label: {
+              backgroundColor: '#6a7985'
+            }
+          },
+          formatter: function(params) {
+            let result = params[0].axisValue + '<br/>'
+            params.forEach(param => {
+              result += `${param.marker}${param.seriesName}: ¥${param.value.toFixed(2)}<br/>`
+            })
+            return result
+          }
+        },
+        legend: {
+          data: ['买入金额', '卖出金额', '总交易额'],
+          top: 'bottom',
+          textStyle: {
+            fontSize: 12
+          }
+        },
+        grid: {
+          left: '8%',
+          right: '4%',
+          bottom: '20%',
+          top: '20%',
+          containLabel: true
         },
         xAxis: {
           type: 'category',
-          data: dates
+          boundaryGap: false,
+          data: dates,
+          axisLabel: {
+            fontSize: 11
+          },
+          name: '交易日期',
+          nameLocation: 'middle',
+          nameGap: 25,
+          nameTextStyle: {
+            fontSize: 12,
+            color: '#666'
+          }
         },
         yAxis: {
-          type: 'value'
+          type: 'value',
+          axisLabel: {
+            formatter: function(value) {
+              if (value >= 10000) {
+                return '¥' + (value / 10000).toFixed(1) + 'w'
+              }
+              return '¥' + value.toFixed(0)
+            },
+            fontSize: 11
+          },
+          name: '交易金额',
+          nameLocation: 'middle',
+          nameGap: 50,
+          nameTextStyle: {
+            fontSize: 12,
+            color: '#666'
+          },
+          splitLine: {
+            lineStyle: {
+              type: 'dashed',
+              color: '#e6e6e6'
+            }
+          }
         },
         series: [
           {
-            name: '交易金额',
+            name: '买入金额',
             type: 'line',
-            data: amounts,
-            smooth: true
+            data: buyAmounts,
+            smooth: true,
+            symbol: 'circle',
+            symbolSize: 6,
+            lineStyle: {
+              width: 2,
+              color: '#67c23a' // 买入用绿色（支出）
+            },
+            itemStyle: {
+              color: '#67c23a'
+            },
+            areaStyle: {
+              color: {
+                type: 'linear',
+                x: 0,
+                y: 0,
+                x2: 0,
+                y2: 1,
+                colorStops: [{
+                  offset: 0, color: 'rgba(103, 194, 58, 0.3)'
+                }, {
+                  offset: 1, color: 'rgba(103, 194, 58, 0.1)'
+                }]
+              }
+            }
+          },
+          {
+            name: '卖出金额',
+            type: 'line',
+            data: sellAmounts,
+            smooth: true,
+            symbol: 'circle',
+            symbolSize: 6,
+            lineStyle: {
+              width: 2,
+              color: '#f56c6c' // 卖出用红色（收入）
+            },
+            itemStyle: {
+              color: '#f56c6c'
+            },
+            areaStyle: {
+              color: {
+                type: 'linear',
+                x: 0,
+                y: 0,
+                x2: 0,
+                y2: 1,
+                colorStops: [{
+                  offset: 0, color: 'rgba(245, 108, 108, 0.3)'
+                }, {
+                  offset: 1, color: 'rgba(245, 108, 108, 0.1)'
+                }]
+              }
+            }
+          },
+          {
+            name: '总交易额',
+            type: 'line',
+            data: totalAmounts,
+            smooth: true,
+            symbol: 'diamond',
+            symbolSize: 8,
+            lineStyle: {
+              width: 3,
+              color: '#409eff',
+              type: 'dashed'
+            },
+            itemStyle: {
+              color: '#409eff'
+            }
           }
         ]
       }
-      
+
       this.tradeChartInstance.setOption(option)
     },
     
@@ -463,11 +640,11 @@ export default {
 }
 
 .text-success {
-  color: #67c23a;
+  color: #f56c6c; /* A股红涨 */
 }
 
 .text-danger {
-  color: #f56c6c;
+  color: #67c23a; /* A股绿跌 */
 }
 
 .el-link {

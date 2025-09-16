@@ -11,10 +11,11 @@ export function getUserAssets() {
 }
 
 // 获取用户持仓
-export function getUserPositions() {
+export function getUserPositions(params = {}) {
   return request({
     url: '/trading/positions/',
-    method: 'get'
+    method: 'get',
+    params
   })
 }
 

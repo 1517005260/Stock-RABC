@@ -26,6 +26,14 @@
         <!-- 交易操作区 -->
         <el-col :span="8">
           <el-card title="股票交易">
+            <!-- 交易状态提示 -->
+            <div class="market-status" :class="{ 'market-closed': !isMarketOpen }">
+              <el-icon v-if="isMarketOpen"><CircleCheckFilled /></el-icon>
+              <el-icon v-else><CircleCloseFilled /></el-icon>
+              <span>{{ isMarketOpen ? '交易时间' : '闭市中' }}</span>
+              <small v-if="!isMarketOpen">交易时间：工作日 9:30-11:30, 13:00-15:00</small>
+            </div>
+
             <el-tabs v-model="activeTab" @tab-change="handleTabChange">
               <el-tab-pane label="买入" name="buy">
                 <el-form ref="buyForm" :model="buyForm" :rules="tradeRules" label-width="80px">
@@ -66,7 +74,7 @@
                       @click="submitTrade('buy')"
                       :disabled="!canBuy"
                     >
-                      买入
+                      {{ isMarketOpen ? '买入' : '闭市中' }}
                     </el-button>
                   </el-form-item>
                 </el-form>
@@ -112,7 +120,7 @@
                       @click="submitTrade('sell')"
                       :disabled="!canSell"
                     >
-                      卖出
+                      {{ isMarketOpen ? '卖出' : '闭市中' }}
                     </el-button>
                   </el-form-item>
                 </el-form>
@@ -219,7 +227,7 @@ import {
   GridComponent
 } from "echarts/components"
 import VChart from "vue-echarts"
-import { ArrowLeft } from '@element-plus/icons-vue'
+import { ArrowLeft, CircleCheckFilled, CircleCloseFilled } from '@element-plus/icons-vue'
 import { getStockDetail, getStockRealtimeData, getStockIntradayChart } from '@/api/stock'
 import { getUserAssets, getUserPositions, getTradeRecords, buyStock, sellStock } from '@/api/trading'
 
@@ -235,7 +243,9 @@ export default {
   name: 'StockTrade',
   components: {
     VChart,
-    ArrowLeft
+    ArrowLeft,
+    CircleCheckFilled,
+    CircleCloseFilled
   },
   data() {
     return {
@@ -274,12 +284,32 @@ export default {
     tsCode() {
       return this.$route.params.tsCode
     },
+
+    isMarketOpen() {
+      const now = new Date()
+      const hour = now.getHours()
+      const minute = now.getMinutes()
+      const currentTime = hour * 100 + minute // 转换为HHMM格式，如 930, 1500
+      const day = now.getDay()
+
+      // 周末不开盘
+      if (day === 0 || day === 6) {
+        return false
+      }
+
+      // 工作日交易时间：9:30-11:30, 13:00-15:00
+      const isOpenSession = (currentTime >= 930 && currentTime <= 1130) ||
+                           (currentTime >= 1300 && currentTime <= 1500)
+
+      return isOpenSession
+    },
+
     canBuy() {
-      return this.buyForm.price && this.buyForm.quantity && 
+      return this.isMarketOpen && this.buyForm.price && this.buyForm.quantity &&
              this.calculateAmount(this.buyForm.price, this.buyForm.quantity) <= this.userBalance
     },
     canSell() {
-      return this.sellForm.price && this.sellForm.quantity &&
+      return this.isMarketOpen && this.sellForm.price && this.sellForm.quantity &&
              this.sellForm.quantity <= this.holdingQuantity * 100 && this.holdingQuantity > 0
     },
     miniChartOption() {
@@ -512,6 +542,12 @@ export default {
       }
     },
     async submitTrade(type) {
+      // 交易时间检查
+      if (!this.isMarketOpen) {
+        this.$message.error('当前非交易时间！交易时间：工作日 9:30-11:30, 13:00-15:00')
+        return
+      }
+
       const form = type === 'buy' ? this.buyForm : this.sellForm
       const formRef = type === 'buy' ? this.$refs.buyForm : this.$refs.sellForm
 
@@ -785,5 +821,33 @@ export default {
 .mini-chart {
   width: 100%;
   height: 200px;
+}
+
+.market-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  margin-bottom: 16px;
+  border-radius: 6px;
+  background-color: #f0f9ff;
+  color: #059669;
+  border: 1px solid #a7f3d0;
+}
+
+.market-status.market-closed {
+  background-color: #fef2f2;
+  color: #dc2626;
+  border-color: #fecaca;
+}
+
+.market-status small {
+  margin-left: auto;
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.market-status .el-icon {
+  font-size: 16px;
 }
 </style>
