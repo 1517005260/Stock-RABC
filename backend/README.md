@@ -1,635 +1,436 @@
-# Django RBAC + 股票交易模拟系统
+# 股票交易模拟系统 - 后端
 
-基于 Django 实现的 RBAC（基于角色的访问控制）后台管理系统，集成了完整的股票交易模拟功能。系统提供了用户、角色、权限管理、AI 聊天功能以及全面的股票交易模拟系统，支持实时行情数据、K 线图、技术分析、新闻资讯等功能。本系统使用 JWT 进行身份验证，支持跨域请求和 WebSocket 实时推送。
-
-## 项目亮点
-
-- 完整的股票交易系统：实现了模拟股票交易的所有核心功能
-- 真实数据支持：基于 TuShare Pro API 获取真实股票行情数据
-- 企业级数据服务：整合量化数据服务和企业级金融数据服务
-- 兼容性设计：兼容新旧版本 tushare API，确保数据稳定性
-- 权限管理完善：支持普通用户、管理员、超级管理员三级权限
-- API 测试完备：提供完整的 API 功能测试脚本
-- 技术指标齐全：支持 MACD、RSI、BOLL、KDJ 等主流技术分析指标
+基于 Django + Django REST Framework 的股票交易模拟系统后端 API，提供完整的股票数据获取、交易模拟和权限管理功能。
 
 ## 技术栈
 
-### 核心框架
+- **框架**: Django 4.x + Django REST Framework
+- **数据库**: SQLite (开发) / PostgreSQL (生产)
+- **缓存**: Redis
+- **认证**: JWT (JSON Web Token)
+- **任务队列**: Django-crontab (定时任务)
+- **数据源**: 东方财富 API、akshare
+- **部署**: Gunicorn + Nginx
 
-- **Python**: 3.10+
-- **Django**: 5.1.1
-- **Django REST Framework**: 3.14.0
-- **JWT 认证**: djangorestframework-jwt 1.11.0
-- **数据库**: SQLite（可扩展至 PostgreSQL 等）
-- **跨域支持**: django-cors-headers 4.7.0
-
-### 实时通信
-
-- **WebSocket**: channels 4.3.1
-- **异步支持**: asgiref 3.9.1
-
-### 定时任务
-
-- **定时任务**: django-crontab 0.7.1
-
-### 股票数据与分析
-
-- **多源数据整合**: tushare 1.2.89
-- **量化数据服务**: 专业的金融市场数据获取与分析平台
-- **企业级金融数据**: 基于 TuShare Pro 的专业金融数据获取平台
-- **数据分析**: pandas 1.5.0+, numpy 1.21.0+
-- **数学计算**: scipy 1.9.0+
-- **API 兼容性**: 兼容新旧版本 tushare，确保数据稳定性
-- **智能缓存**: 实现数据缓存和 API 限流机制
-- **实时推送**: 支持 5 秒刷新的实时股票数据推送
-
-### 网络请求与解析
-
-- **HTTP 客户端**: httpx 0.27.2, requests 2.31.0+
-- **网页解析**: beautifulsoup4 4.13.0+
-
-### AI 功能
-
-- **OpenAI API**: openai 1.55.3+
-
-### 环境配置
-
-- **环境变量**: python-dotenv 1.0.0
-
-## 主要功能特性
-
-### 1. RBAC 权限管理系统
-
-- 用户、角色、权限三层管理
-- JWT 身份验证
-- 灵活的菜单权限控制
-- 多级角色体系（普通用户、管理员、超级管理员）
-
-### 2. 股票交易模拟系统
-
-- **实时股票行情**: 支持股票价格实时推送（每 5 秒刷新）
-- **K 线图数据**: 日 K、周 K、月 K 线数据，支持多种技术指标
-- **技术分析**: MACD、RSI、BOLL、KDJ、MA、EMA 等技术指标
-- **分时图**: 模拟分时数据，支持交易时间检测
-- **模拟交易**: 股票买入/卖出、持仓管理、交易记录
-- **市场概况**: 涨跌统计、主要指数、交易状态
-- **股票搜索**: 支持股票代码、名称搜索
-- **行业分类**: 股票行业筛选功能
-
-### 3. 新闻资讯系统
-
-- **财经新闻**: 自动爬取并展示财经新闻
-- **新闻分类**: 支持新闻分类管理
-- **实时推送**: WebSocket 推送最新新闻到客户端
-- **新闻管理**: 管理员可创建和管理新闻内容
-
-### 4. WebSocket 实时通信
-
-- **实时数据推送**: 股票价格、市场数据实时推送
-- **订阅机制**: 支持订阅特定股票的实时数据
-- **交易时间检测**: 智能检测交易时间，仅在交易时间推送数据
-- **用户通知**: 支持个人消息通知推送
-
-### 5. 定时任务系统
-
-- **数据同步**: 每个交易日收盘后自动同步股票数据
-- **新闻爬取**: 定时爬取财经新闻
-- **数据清理**: 自动清理过期的历史数据
-
-### 6. AI 聊天助手
-
-- **流式聊天**: 基于 OpenAI API 的智能对话
-- **聊天限制**: 普通用户每日聊天次数限制
-- **历史记录**: 完整的聊天历史记录
-
-## 安装与启动
-
-### 前提条件
-
-- Python 3.10 或更高版本
-- pip 包管理工具
-- 虚拟环境工具(推荐使用 venv 或 conda)
-- Tushare Pro API Token (用于获取股票数据)
-
-### 步骤 1: 克隆仓库
-
-```bash
-git clone 本项目
-cd Mini-RABC/backend
-```
-
-### 步骤 2: 创建并激活虚拟环境
-
-```bash
-# 使用conda创建虚拟环境
-conda create -n rabc python==3.10
-conda activate rabc
-
-# 或使用venv
-python -m venv venv
-# Windows
-venv\Scripts\activate
-# Mac/Linux
-source venv/bin/activate
-```
-
-### 步骤 3: 安装依赖
-
-```bash
-pip install -r requirements.txt
-```
-
-### 步骤 4: 配置环境变量
-
-创建`.env`文件并配置以下参数：
-
-```env
-# OpenAI API配置
-OPENAI_API_KEY=your_openai_api_key_here
-OPENAI_MODEL=gpt-4o
-OPENAI_MAX_TOKENS=2000
-OPENAI_TEMPERATURE=0.7
-
-# 聊天配置
-CHAT_DAILY_LIMIT=5  # 普通用户每日消息限制
-
-# Tushare Pro API配置 (必需)
-TUSHARE_TOKEN=your_tushare_pro_api_token_here
-```
-
-### 步骤 5: 初始化数据库
-
-```bash
-# 执行数据库迁移
-python manage.py makemigrations
-python manage.py migrate
-
-# 初始化系统数据（包括用户、角色、股票数据）
-python init_system.py
-```
-
-### 步骤 6: 配置定时任务（可选）
-
-```bash
-# 添加定时任务到系统crontab
-python manage.py crontab add
-
-# 查看已添加的定时任务
-python manage.py crontab show
-
-# 移除定时任务
-python manage.py crontab remove
-```
-
-### 步骤 7: 启动服务器
-
-#### 开发环境
-
-```bash
-# 启动HTTP服务器
-python manage.py runserver
-
-# 如需WebSocket功能，使用ASGI服务器，注意与上条命令互斥，启动一个即可
-daphne -p 8000 app.asgi:application
-```
-
-#### 生产环境
-
-```bash
-# 使用Gunicorn + Uvicorn
-pip install gunicorn uvicorn
-gunicorn app.asgi:application -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
-```
-
-服务器将在 `http://localhost:8000/` 运行。
-
-## 项目架构
+## 项目结构
 
 ```
 backend/
-├── app/                  # 主应用配置
-│   ├── settings.py       # Django设置
-│   ├── urls.py           # 主URL配置
-│   ├── wsgi.py           # WSGI配置
-│   └── asgi.py           # ASGI配置 (支持WebSocket)
-├── chat/                 # AI聊天模块
-├── role/                 # 角色管理模块
-├── user/                 # 用户管理模块
-├── stock/                # 股票交易模块
-│   ├── models.py         # 股票相关模型
-│   ├── views.py          # 股票API视图
-│   ├── services.py       # 股票业务逻辑
-│   ├── consumers.py      # WebSocket消费者
-│   ├── routing.py        # WebSocket路由
-│   └── tasks.py          # 定时任务
-├── trading/              # 交易功能模块
-│   ├── models.py         # 交易相关模型
-│   └── views.py          # 交易API视图
-├── utils/                # 工具类
-│   ├── permissions.py    # 权限装饰器
-│   └── jwt_helper.py     # JWT工具类
-├── manage.py             # Django管理脚本
-├── requirements.txt      # 项目依赖
-├── init_system.py        # 系统初始化脚本
-└── README.md             # 项目文档
+├── app/                 # Django项目配置
+│   ├── settings.py     # 项目设置
+│   ├── urls.py         # 主路由配置
+│   └── wsgi.py         # WSGI配置
+├── user/               # 用户管理模块
+│   ├── models.py       # 用户模型
+│   ├── views.py        # 用户API视图
+│   └── serializers.py  # 序列化器
+├── role/               # 角色权限模块
+│   ├── models.py       # 角色权限模型
+│   └── views.py        # 权限API视图
+├── stock/              # 股票数据模块
+│   ├── models.py       # 股票模型
+│   ├── views.py        # 股票API视图
+│   ├── services.py     # 股票数据服务
+│   ├── redis_cache.py  # Redis缓存管理
+│   └── tasks.py        # 定时任务
+├── trading/            # 交易模拟模块
+│   ├── models.py       # 交易模型
+│   ├── views.py        # 交易API视图
+│   └── services.py     # 交易业务逻辑
+├── utils/              # 工具模块
+│   ├── permissions.py  # 权限验证
+│   ├── response.py     # 统一响应格式
+│   └── exceptions.py   # 异常处理
+├── init_system.py      # 系统初始化脚本
+├── market_data_cron.py # 市场数据定时更新
+├── requirements.txt    # 依赖包列表
+└── manage.py          # Django管理脚本
 ```
 
-## API 接口文档
+## 核心功能模块
 
-### 用户认证接口
+### 1. 用户管理模块 (`user/`)
 
-#### 用户登录
+**数据模型**:
 
-```http
-POST /user/login
+- `SysUser`: 用户基本信息
+- `SysUserRole`: 用户-角色关联
+
+**主要功能**:
+
+- 用户注册、登录、注销
+- JWT Token 认证
+- 用户信息 CRUD
+- 密码加密存储
+
+**API 接口**:
+
+```
+POST /user/login/          # 用户登录
+POST /user/register/       # 用户注册
+GET  /user/info/          # 获取用户信息
+PUT  /user/info/          # 更新用户信息
+POST /user/logout/        # 用户注销
+```
+
+### 2. 角色权限模块 (`role/`)
+
+**数据模型**:
+
+- `SysRole`: 角色信息
+- `SysMenu`: 菜单权限
+- `SysRoleMenu`: 角色-菜单关联
+
+**主要功能**:
+
+- RBAC 权限控制
+- 角色管理
+- 菜单权限管理
+- 动态权限验证
+
+**API 接口**:
+
+```
+GET  /role/list/          # 角色列表
+POST /role/create/        # 创建角色
+PUT  /role/update/{id}/   # 更新角色
+GET  /role/menus/{id}/    # 角色菜单权限
+```
+
+### 3. 股票数据模块 (`stock/`)
+
+**数据模型**:
+
+- `StockInfo`: 股票基本信息
+- `StockDaily`: 日行情数据
+- `MarketIndex`: 市场指数
+
+**主要功能**:
+
+- 股票基础数据获取
+- 实时行情数据
+- K 线数据计算
+- 技术指标分析
+- Redis 缓存管理
+
+**核心服务**:
+
+- `QuantitativeDataService`: 量化数据服务
+- `RedisCache`: 缓存管理服务
+- `TushareService`: Tushare 数据接口
+
+**API 接口**:
+
+```
+GET  /stock/list/                    # 股票列表
+GET  /stock/detail/{code}/           # 股票详情
+GET  /stock/kline/{code}/            # K线数据
+GET  /stock/market/indices/          # 市场指数
+GET  /stock/market/cache/status/     # 缓存状态
+POST /stock/market/cache/refresh/    # 刷新缓存
+```
+
+### 4. 交易模拟模块 (`trading/`)
+
+**数据模型**:
+
+- `UserStockAccount`: 用户股票账户
+- `UserPosition`: 用户持仓
+- `TradeRecord`: 交易记录
+- `MarketNews`: 市场资讯
+
+**主要功能**:
+
+- 模拟买入/卖出
+- 账户资金管理
+- 持仓管理
+- 盈亏计算
+- 交易记录查询
+
+**业务逻辑**:
+
+- 交易风控检查
+- 资金冻结/解冻
+- 持仓成本计算
+- 盈亏实时更新
+
+**API 接口**:
+
+```
+GET  /trading/account/           # 账户信息
+POST /trading/buy/               # 买入股票
+POST /trading/sell/              # 卖出股票
+GET  /trading/positions/         # 持仓查询
+GET  /trading/records/           # 交易记录
+GET  /trading/news/              # 市场资讯
+```
+
+## 设计思路
+
+### 1. 分层架构设计
+
+```
+API层 (views.py)           # 接口路由，参数验证
+ ↓
+业务逻辑层 (services.py)   # 核心业务逻辑
+ ↓
+数据访问层 (models.py)     # 数据模型，数据库操作
+ ↓
+数据存储层 (Database)      # SQLite/PostgreSQL + Redis
+```
+
+### 2. 数据获取策略
+
+- **实时数据**: 通过东方财富 API 获取
+- **历史数据**: 使用 akshare 库补充
+- **缓存机制**: Redis 缓存热点数据，减少 API 调用
+- **定时更新**: 每 30 分钟更新一次市场数据
+
+### 3. 权限控制设计
+
+- **JWT 认证**: 无状态认证机制
+- **RBAC 模型**: 基于角色的权限控制
+- **装饰器权限**: 使用@permission_required 装饰器
+- **细粒度控制**: 支持菜单级和功能级权限
+
+### 4. 交易业务设计
+
+- **账户模型**: 模拟真实证券账户
+- **交易规则**: T+1 交易，涨跌停限制
+- **风控机制**: 资金充足性检查，持仓限制
+- **数据一致性**: 事务保证数据完整性
+
+## 安装和启动
+
+### 环境要求
+
+- Python 3.10+
+- Redis 服务器
+- pip 包管理工具
+
+### 安装依赖
+
+```bash
+cd backend
+pip install -r requirements.txt
+```
+
+### 环境配置
+
+复制环境配置文件：
+
+```bash
+cp .env.example .env
+```
+
+编辑 `.env` 文件，配置必要参数：
+
+```
+# 数据库配置
+DATABASE_URL=sqlite:///db.sqlite3
+
+# Redis配置
+REDIS_URL=redis://localhost:6379/0
+
+# 安全配置
+SECRET_KEY=your-secret-key
+DEBUG=True
+
+# 股票数据API
+TUSHARE_TOKEN=your-tushare-token
+```
+
+### 数据库初始化
+
+```bash
+# 创建数据库表
+python manage.py migrate
+
+# 或使用一键初始化脚本
+python init_system.py
+```
+
+### 启动服务
+
+**开发环境**:
+
+```bash
+python manage.py runserver
+```
+
+**生产环境**:
+
+```bash
+gunicorn app.wsgi:application
+```
+
+### 启动市场数据更新器
+
+```bash
+# Windows系统
+python windows_market_updater.py
+
+# Linux系统 (使用crontab)
+python manage.py crontab add
+```
+
+## 核心 API 说明
+
+### 1. 用户认证 API
+
+**用户登录**
+
+```
+POST /user/login/
 Content-Type: application/json
 
 {
-    "username": "python222",
+    "username": "trader001",
     "password": "123456"
 }
 
-# 响应
+Response:
 {
     "code": 200,
-    "info": "登录成功",
-    "token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
-    "user": {
-        "id": 1,
-        "username": "python222",
-        "roles": "超级管理员"
-    },
-    "permissions": ["system:user:list", "system:user:edit", ...]
+    "msg": "登录成功",
+    "data": {
+        "token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+        "user": {
+            "id": 1,
+            "username": "trader001",
+            "email": "trader001@example.com"
+        },
+        "roles": ["普通用户"],
+        "menus": [...]
+    }
 }
 ```
 
-### 股票行情接口
+### 2. 股票数据 API
 
-#### 获取股票列表
+**获取股票列表**
 
-```http
-GET /stock/list/?page=1&pageSize=20&keyword=&industry=&market=
-Authorization: Bearer <token>
+```
+GET /stock/list/?page=1&size=20&search=腾讯
 
-# 响应
+Response:
 {
     "code": 200,
-    "msg": "获取成功",
     "data": {
-        "list": [
+        "count": 5470,
+        "results": [
             {
                 "ts_code": "000001.SZ",
-                "symbol": "000001",
                 "name": "平安银行",
-                "industry": "银行",
-                "current_price": 10.59,
-                "change": 0.094,
-                "pct_chg": 0.899,
-                "volume": 846318,
-                "amount": 113013.67
+                "close": 12.34,
+                "pct_chg": 2.15,
+                "volume": 123456789
             }
-        ],
-        "total": 4000,
-        "page": 1,
-        "pageSize": 20,
-        "totalPages": 200
+        ]
     }
 }
 ```
 
-#### 获取股票详情
+**获取 K 线数据**
 
-```http
-GET /stock/detail/<ts_code>/
-Authorization: Bearer <token>
-
-# 响应
-{
-    "code": 200,
-    "msg": "获取成功",
-    "data": {
-        "ts_code": "000001.SZ",
-        "name": "平安银行",
-        "current_price": 10.59,
-        "history_data": [...],  # 最近30天历史数据
-        "company_info": {...}   # 公司基本信息
-    }
-}
 ```
+GET /stock/kline/000001.SZ/?period=daily&limit=100
 
-#### 获取实时股票价格
-
-```http
-GET /stock/realtime/price/<ts_code>/
-Authorization: Bearer <token>
-
-# 响应
+Response:
 {
     "code": 200,
-    "msg": "获取成功",
     "data": {
-        "ts_code": "000001.SZ",
-        "current_price": 10.59,
-        "change": 0.094,
-        "pct_chg": 0.899,
-        "volume": 846318,
-        "timestamp": "2025-09-09T19:28:38.729799",
-        "is_real_time": true
-    }
-}
-```
-
-#### 获取 K 线数据
-
-```http
-GET /stock/kline/<ts_code>/?period=daily&limit=100&adjust=qfq
-Authorization: Bearer <token>
-
-# 参数说明:
-# period: daily(日K), weekly(周K), monthly(月K)
-# limit: 数据条数，最大500
-# adjust: qfq(前复权), hfq(后复权), none(不复权)
-
-# 响应
-{
-    "code": 200,
-    "msg": "获取成功",
-    "data": {
-        "ts_code": "000001.SZ",
-        "name": "平安银行",
-        "period": "daily",
-        "count": 100,
-        "kline_data": [
+        "kline": [
             {
-                "date": "2025-09-09",
-                "open": 10.5,
-                "high": 10.77,
-                "low": 10.31,
-                "close": 10.59,
-                "volume": 846318,
-                "amount": 113013.67
+                "trade_date": "2024-01-15",
+                "open": 12.00,
+                "high": 12.50,
+                "low": 11.80,
+                "close": 12.34,
+                "volume": 123456789
             }
         ],
-        "technical_indicators": {
-            "ma5": [10.2, 10.3, ...],
-            "ma10": [10.1, 10.2, ...],
-            "macd": {
-                "dif": [0.1, 0.2, ...],
-                "dea": [0.05, 0.15, ...],
-                "macd": [0.1, 0.1, ...]
-            },
-            "rsi": [45.2, 48.5, ...],
-            "boll": {
-                "upper": [11.2, 11.3, ...],
-                "middle": [10.5, 10.6, ...],
-                "lower": [9.8, 9.9, ...]
-            }
+        "indicators": {
+            "ma5": [12.10, 12.15, 12.20],
+            "ma10": [12.00, 12.05, 12.10]
         }
     }
 }
 ```
 
-#### 获取分时图数据
+### 3. 交易模拟 API
 
-```http
-GET /stock/realtime/chart/<ts_code>/
-Authorization: Bearer <token>
+**买入股票**
 
-# 响应
-{
-    "code": 200,
-    "msg": "获取成功",
-    "data": {
-        "ts_code": "000001.SZ",
-        "intraday_data": [
-            {
-                "time": "09:30",
-                "price": 10.6,
-                "volume": 784,
-                "avg_price": 10.55,
-                "change": 0.1,
-                "pct_change": 0.95
-            }
-        ],
-        "base_info": {
-            "current_price": 10.59,
-            "pre_close": 10.5,
-            "high": 10.77,
-            "low": 10.31
-        }
-    }
-}
 ```
-
-#### 获取市场概况
-
-```http
-GET /stock/market/overview/
-Authorization: Bearer <token>
-
-# 响应
-{
-    "code": 200,
-    "msg": "获取成功",
-    "data": {
-        "indices": [
-            {
-                "ts_code": "000001.SH",
-                "name": "上证指数",
-                "current_price": 3200.5,
-                "change": 15.2,
-                "pct_chg": 0.48
-            }
-        ],
-        "market_stats": {
-            "trade_date": "2025-09-09",
-            "total_stocks": 4000,
-            "up_count": 2100,
-            "down_count": 1800,
-            "equal_count": 100,
-            "up_ratio": 52.5
-        },
-        "trading_status": {
-            "is_trading_time": false,
-            "time_period": "after_market",
-            "timestamp": "2025-09-09T19:27:06.032772"
-        }
-    }
-}
-```
-
-### 交易功能接口
-
-#### 获取用户账户信息
-
-```http
-GET /trading/account/
-Authorization: Bearer <token>
-```
-
-#### 股票买入
-
-```http
 POST /trading/buy/
-Authorization: Bearer <token>
 Content-Type: application/json
 
 {
     "ts_code": "000001.SZ",
-    "price": 10.50,
-    "shares": 1000
+    "shares": 100,
+    "price": 12.34
 }
-```
 
-#### 股票卖出
-
-```http
-POST /trading/sell/
-Authorization: Bearer <token>
-Content-Type: application/json
-
-{
-    "ts_code": "000001.SZ",
-    "price": 10.60,
-    "shares": 500
-}
-```
-
-#### 获取用户持仓
-
-```http
-GET /trading/positions/
-Authorization: Bearer <token>
-```
-
-#### 获取交易记录
-
-```http
-GET /trading/records/?page=1&pageSize=20
-Authorization: Bearer <token>
-```
-
-### 新闻资讯接口
-
-#### 获取最新新闻
-
-```http
-GET /stock/news/latest/?limit=10&category=市场动态
-Authorization: Bearer <token>
-
-# 响应
+Response:
 {
     "code": 200,
-    "msg": "获取成功",
-    "data": [
-        {
-            "id": 1,
-            "title": "A股市场今日震荡上涨，科技股表现强势",
-            "source": "财经新闻",
-            "category": "市场动态",
-            "publish_time": "2025-09-09 10:10:35",
-            "summary": "今日A股三大指数集体上涨，创业板指涨幅超过2%...",
-            "related_stocks": []
-        }
-    ]
+    "msg": "买入成功",
+    "data": {
+        "trade_id": "T20240115001",
+        "amount": 1234.00,
+        "fee": 1.23
+    }
 }
 ```
 
-#### 创建新闻（管理员权限）
+## 数据缓存策略
 
-```http
-POST /stock/news/create/
-Authorization: Bearer <token>
-Content-Type: application/json
+### Redis 缓存结构
 
-{
-    "title": "新闻标题",
-    "content": "新闻内容",
-    "source": "新闻来源",
-    "category": "新闻分类",
-    "related_stocks": ["000001.SZ", "000002.SZ"]
-}
+```
+stock:basic:{ts_code}           # 股票基本信息 (24小时)
+stock:daily:{ts_code}           # 日行情数据 (4小时)
+market:indices                  # 市场指数 (1小时)
+market:hot_stocks              # 热门股票 (30分钟)
+user:positions:{user_id}       # 用户持仓 (实时)
 ```
 
-### WebSocket 实时推送
+### 缓存更新机制
 
-#### 连接 WebSocket
+1. **定时更新**: 每 30 分钟全量更新市场数据
+2. **实时更新**: 交易操作后立即更新相关缓存
+3. **懒加载**: 首次访问时从 API 获取并缓存
+4. **缓存预热**: 系统启动时预加载热点数据
 
-```javascript
-// 连接股票实时数据推送
-const ws = new WebSocket(
-  "ws://localhost:8000/ws/stock/realtime/general/?token=<jwt_token>"
-);
+## 定时任务
 
-// 监听消息
-ws.onmessage = function (event) {
-  const data = JSON.parse(event.data);
-  console.log("推送数据:", data);
+### 市场数据更新任务
 
-  switch (data.type) {
-    case "market_data":
-      // 市场数据：热门股票、市场概况、最新新闻
-      updateMarketData(data.data);
-      break;
-    case "realtime_data":
-      // 订阅股票实时数据
-      updateStockPrices(data.data);
-      break;
-    case "connection_established":
-      console.log("WebSocket连接成功");
-      break;
-  }
-};
+```python
+# market_data_cron.py
+@cron_job(minute='*/30')  # 每30分钟执行
+def update_market_data():
+    """更新市场数据到缓存"""
+    cache_service = RedisCache()
+    data_service = QuantitativeDataService()
 
-// 订阅特定股票
-ws.send(
-  JSON.stringify({
-    type: "subscribe",
-    ts_codes: ["000001.SZ", "000002.SZ"],
-  })
-);
+    # 更新基础数据
+    cache_service.refresh_all_cache()
+
+    # 更新指数数据
+    data_service.update_market_indices()
 ```
 
-### 数据同步接口（超级管理员权限）
+### Windows 定时更新器
 
-#### 手动同步股票数据
+```bash
+# 启动后台更新服务
+python windows_market_updater.py
 
-```http
-POST /stock/sync/
-Authorization: Bearer <token>
-Content-Type: application/json
+# 立即更新一次
+python windows_market_updater.py --once
 
-{
-    "type": "basic"  # basic(基本信息), daily(日线数据), company(公司信息)
-}
+# 自定义更新间隔(分钟)
+python windows_market_updater.py --interval 15
 ```
-
-## 错误处理
-
-API 返回的错误响应格式统一如下：
-
-```json
-{
-  "code": 400,
-  "msg": "错误描述信息",
-  "data": null
-}
-```
-
-常见错误码：
-
-- `200`: 成功
-- `400`: 请求参数错误
-- `401`: 未认证或 Token 无效
-- `403`: 权限不足
-- `404`: 资源不存在
-- `500`: 服务器内部错误
-
-## 注意事项
-
-1. **生产环境部署**时请修改`SECRET_KEY`并关闭`DEBUG`模式
-2. **默认管理员账号**：`python222`，密码：`123456`
-3. **Tushare API**：需要在 https://tushare.pro/ 注册并获取 API Token 才能获取真实股票数据
-4. **WebSocket 支持**：需要 ASGI 服务器支持，推荐使用 Daphne 或 Uvicorn
-5. **定时任务**：Linux 环境下可使用 crontab，Windows 环境下可使用计划任务
-6. **数据库扩展**：支持 PostgreSQL、MySQL 等数据库，需安装相应驱动
