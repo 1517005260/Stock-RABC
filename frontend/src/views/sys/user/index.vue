@@ -10,7 +10,7 @@
         :icon="DocumentAdd" 
         @click="handleDialogValue()"
         v-permission="'system:user:add'"
-      >新增</el-button>
+      ></el-button>
       <el-popconfirm 
         title="您确定批量删除这些记录吗？" 
         @confirm="handleDelete(null)"
@@ -32,11 +32,11 @@
       <el-table-column type="selection" width="55"/>
       <el-table-column prop="avatar" label="头像" width="80" align="center">
         <template v-slot="scope">
-          <img 
-            :src="getServerUrl()+'media/userAvatar/'+(scope.row.avatar || 'default.jpg')" 
-            width="50" 
+          <img
+            :src="buildAvatarUrl(scope.row.avatar)"
+            width="50"
             height="50"
-            onerror="this.src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADIAAAAyCAYAAAAeP4ixAAAACXBIWXMAAAsTAAALEwEAmpwYAAAFEmlUWHRYTUw6Y29tLmFkb2JlLnhtcAAAAAAAPD94cGFja2V0IGJlZ2luPSLvu78iIGlkPSJXNU0wTXBDZWhpSHpyZVN6TlRjemtjOWQiPz4gPHg6eG1wbWV0YSB4bWxuczp4PSJhZG9iZTpuczptZXRhLyIgeDp4bXB0az0iQWRvYmUgWE1QIENvcmUgNS42LWMxNDAgNzkuMTYwNDUxLCAyMDE3LzA1LzA2LTAxOjA4OjIxICAgICAgICAiPiA8cmRmOlJERiB4bWxuczpyZGY9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkvMDIvMjItcmRmLXN5bnRheC1ucyMiPiA8cmRmOkRlc2NyaXB0aW9uIHJkZjphYm91dD0iIiB4bWxuczp4bXA9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC8iIHhtbG5zOmRjPSJodHRwOi8vcHVybC5vcmcvZGMvZWxlbWVudHMvMS4xLyIgeG1sbnM6cGhvdG9zaG9wPSJodHRwOi8vbnMuYWRvYmUuY29tL3Bob3Rvc2hvcC8xLjAvIiB4bWxuczp4bXBNTT0iaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wL21tLyIgeG1sbnM6c3RFdnQ9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9zVHlwZS9SZXNvdXJjZUV2ZW50IyIgeG1wOkNyZWF0b3JUb29sPSJBZG9iZSBQaG90b3Nob3AgQ0MgMjAxOCAoTWFjaW50b3NoKSIgeG1wOkNyZWF0ZURhdGU9IjIwMTktMDctMDdUMTY6Mzk6MjMrMDg6MDAiIHhtcDpNb2RpZnlEYXRlPSIyMDE5LTA3LTA3VDE2OjQwOjI5KzA4OjAwIiB4bXA6TWV0YWRhdGFEYXRlPSIyMDE5LTA3LTA3VDE2OjQwOjI5KzA4OjAwIiBkYzpmb3JtYXQ9ImltYWdlL3BuZyIgcGhvdG9zaG9wOkNvbG9yTW9kZT0iMyIgcGhvdG9zaG9wOklDQ1Byb2ZpbGU9InNSR0IgSUVDNjE5NjYtMi4xIiB4bXBNTTpJbnN0YW5jZUlEPSJ4bXAuaWlkOmM1OThjMGI1LTEw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'"
+            @error="handleImageError"
           />
         </template>
       </el-table-column>
@@ -170,7 +170,11 @@ const initUserList = async () => {
   try {
     tableLoading.value = true
     const res = await requestUtil.post("user/search", queryForm.value)
-    if (res.data && res.data.userList) {
+
+    if (res.data && res.data.code === 200 && res.data.data) {
+      tableData.value = res.data.data.userList || []
+      total.value = res.data.data.total || 0
+    } else if (res.data && res.data.userList) {
       tableData.value = res.data.userList || []
       total.value = res.data.total || 0
     } else {
@@ -299,6 +303,16 @@ const handleSelectionRemove = (ids) => {
   }
   
   handleDelete(ids[0])
+}
+
+const buildAvatarUrl = (avatar) => {
+  const baseUrl = getServerUrl().replace(/\/$/, '')
+  const avatarName = avatar || 'default.jpg'
+  return `${baseUrl}/media/userAvatar/${avatarName}`
+}
+
+const handleImageError = (event) => {
+  event.target.src = buildAvatarUrl('default.jpg')
 }
 
 onMounted(() => {

@@ -99,13 +99,17 @@ class AuthenticationView(APIView):
             
             if SysUser.objects.filter(username=username).exists():
                 return JsonResponse({'code': 400, 'msg': '用户名已存在'})
-            
+
+            # 密码MD5加密
+            import hashlib
+            password_md5 = hashlib.md5(password.encode()).hexdigest()
+
             # 创建用户
             user = SysUser.objects.create(
                 username=username,
-                password=password,
+                password=password_md5,
                 email=email,
-                status=1,
+                status=0,  # 正常状态
                 create_time=timezone.now(),
                 update_time=timezone.now(),
                 avatar='default.jpg'
@@ -305,13 +309,18 @@ class UserManagementView(APIView):
             if int(user_id) == -1:  # 新增用户
                 if not self._is_superadmin(current_user_id):
                     return JsonResponse({'code': 403, 'msg': '只有超级管理员可以添加用户'})
-                
+
+                # 密码MD5加密
+                import hashlib
+                password = data.get('password', '123456')
+                password_md5 = hashlib.md5(password.encode()).hexdigest()
+
                 user = SysUser.objects.create(
                     username=data['username'],
-                    password=data.get('password', '123456'),
+                    password=password_md5,
                     email=data.get('email', ''),
                     phonenumber=data.get('phonenumber', ''),
-                    status=data.get('status', 1),
+                    status=data.get('status', 0),  # 默认正常状态
                     create_time=timezone.now(),
                     update_time=timezone.now(),
                     avatar=data.get('avatar', 'default.jpg')
@@ -347,12 +356,18 @@ class UserManagementView(APIView):
             user_id = data['id']
             old_password = data['oldPassword']
             new_password = data['newPassword']
-            
+
             user = SysUser.objects.get(id=user_id)
-            if user.password != old_password:
+
+            # 验证原密码（MD5加密后比较）
+            import hashlib
+            old_password_md5 = hashlib.md5(old_password.encode()).hexdigest()
+            if user.password != old_password_md5:
                 return JsonResponse({'code': 400, 'msg': '原密码错误'})
-            
-            user.password = new_password
+
+            # 新密码MD5加密
+            new_password_md5 = hashlib.md5(new_password.encode()).hexdigest()
+            user.password = new_password_md5
             user.update_time = timezone.now()
             user.save()
             
@@ -370,7 +385,12 @@ class UserManagementView(APIView):
             
             user_id = data.get("id")
             user = SysUser.objects.get(id=user_id)
-            user.password = "123456"
+
+            # 重置密码为123456的MD5值
+            import hashlib
+            default_password = "123456"
+            password_md5 = hashlib.md5(default_password.encode()).hexdigest()
+            user.password = password_md5
             user.update_time = timezone.now()
             user.save()
             
@@ -602,8 +622,7 @@ class GrantRole(UserManagementView):
     """角色授权视图 - 兼容性"""
     def post(self, request):
         data = json.loads(request.body.decode("utf-8"))
-        data['action'] = 'grant_role'
-        return super().post(request)
+        return self._grant_role(request, data)
 
 
 class SearchView(UserManagementView):

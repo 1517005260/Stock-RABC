@@ -51,10 +51,23 @@ const getUserInfo = () => {
 // 获取用户头像URL
 const avatarUrl = computed(() => {
   const user = getUserInfo()
-  if (!user || !user.avatar) {
-    return defaultAvatar
+
+  try {
+    let baseUrl = getServerUrl()
+    // 确保baseUrl以/结尾
+    if (!baseUrl.endsWith('/')) {
+      baseUrl += '/'
+    }
+
+    // 使用服务器端的default.jpg作为默认头像，与其他页面保持一致
+    const avatarName = user?.avatar || 'default.jpg'
+    const fullUrl = `${baseUrl}media/userAvatar/${avatarName}`
+    return fullUrl
+  } catch (error) {
+    console.error("构建头像URL失败:", error)
+    // 如果构建失败，返回服务器端默认头像
+    return `${getServerUrl()}media/userAvatar/default.jpg`
   }
-  return getServerUrl() + 'media/userAvatar/' + user.avatar
 })
 
 // 获取用户名

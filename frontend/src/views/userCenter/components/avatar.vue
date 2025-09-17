@@ -58,12 +58,11 @@ const initForm = () => {
   if (props.user && props.user.id) {
     form.value.id = props.user.id
     form.value.avatar = props.user.avatar || ''
-    
-    if (form.value.avatar) {
-      imageUrl.value = getServerUrl() + 'media/userAvatar/' + form.value.avatar
-    } else {
-      imageUrl.value = getServerUrl() + 'media/userAvatar/default.jpg'
-    }
+
+    // 使用与sys/user页面一致的URL构建方式
+    const baseUrl = getServerUrl().replace(/\/$/, '')
+    const avatarName = form.value.avatar || 'default.jpg'
+    imageUrl.value = `${baseUrl}/media/userAvatar/${avatarName}`
   }
 }
 
@@ -74,7 +73,8 @@ onMounted(() => {
 const handleAvatarSuccess = (res) => {
   try {
     if (res && res.title) {
-      imageUrl.value = getServerUrl() + 'media/userAvatar/' + res.title
+      const baseUrl = getServerUrl().replace(/\/$/, '')
+      imageUrl.value = `${baseUrl}/media/userAvatar/${res.title}`
       form.value.avatar = res.title
       ElMessage.success('头像上传成功，点击确认以保存')
     } else {

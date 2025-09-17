@@ -232,27 +232,32 @@ export default {
       if (eventSource.value) {
         eventSource.value.close()
       }
-      
+
       // 获取token
       const token = sessionStorage.getItem('token')
-      
+
       try {
-        // 创建新的SSE连接，带上token
-        const url = `${request.getServerUrl()}chat/stream/${chatId}/`
-        console.log('连接SSE URL:', url)
-        
-        // 创建URL对象
-        const eventUrl = new URL(url)
-        
-        // 添加token作为URL参数
-        if (token) {
-          eventUrl.searchParams.append('token', token)
+        // 构建SSE URL
+        let baseUrl = request.getServerUrl()
+        // 确保baseUrl以/结尾
+        if (!baseUrl.endsWith('/')) {
+          baseUrl += '/'
         }
-        
-        console.log('带token的SSE URL:', eventUrl.toString())
-        
+
+        const sseUrl = `${baseUrl}chat/stream/${chatId}/`
+        console.log('连接SSE URL:', sseUrl)
+
+        // 创建URL对象并添加token参数
+        let finalUrl = sseUrl
+        if (token) {
+          const separator = sseUrl.includes('?') ? '&' : '?'
+          finalUrl = `${sseUrl}${separator}token=${encodeURIComponent(token)}`
+        }
+
+        console.log('最终SSE URL:', finalUrl)
+
         // 创建事件源
-        eventSource.value = new EventSource(eventUrl.toString())
+        eventSource.value = new EventSource(finalUrl)
         
         // 监听连接打开
         eventSource.value.onopen = () => {

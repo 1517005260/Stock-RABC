@@ -29,8 +29,8 @@
       </el-form-item>
       <el-form-item label="状态" prop="status">
         <el-radio-group v-model="form.status">
-          <el-radio :label="0">禁用</el-radio>
-          <el-radio :label="1">正常</el-radio>
+          <el-radio :label="1">禁用</el-radio>
+          <el-radio :label="0">正常</el-radio>
         </el-radio-group>
       </el-form-item>
 
@@ -79,7 +79,7 @@ const form = ref({
   id: -1,
   username: "",
   password: "123456",
-  status: 1,
+  status: 0,
   phonenumber: "",
   email: "",
   remark: ""
@@ -135,7 +135,7 @@ watch(
           id: -1,
           username: "",
           password: "123456",
-          status: 1,
+          status: 0,
           phonenumber: "",
           email: "",
           remark: ""

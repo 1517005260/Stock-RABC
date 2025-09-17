@@ -366,10 +366,8 @@ export default {
     async getHotStocksList() {
       try {
         const response = await getHotStocks({ limit: 10 })
-        console.log('热门股票响应:', response.data) // 调试日志
         if (response.data.code === 200) {
           this.hotStocks = response.data.data || []
-          console.log('热门股票数据:', this.hotStocks) // 调试日志
         }
       } catch (error) {
         console.error('获取热门股票失败:', error)
@@ -874,11 +872,9 @@ export default {
     async getMarketOverviewData() {
       try {
         const response = await getMarketOverview()
-        console.log('市场概况API完整响应:', response.data) // 调试日志
 
         if (response.data.code === 200 && response.data.data) {
           const marketStats = response.data.data.market_stats || {}
-          console.log('市场统计原始数据:', marketStats) // 调试日志
 
           // 使用API返回的真实数据，适配新的字段结构
           this.marketStats.up_count = marketStats.up_count || 0
@@ -902,11 +898,6 @@ export default {
             }))
           }
 
-          console.log('处理后的市场数据:', {
-            marketStats: this.marketStats,
-            indices: this.marketIndices,
-            dataSource: response.data.data.data_source
-          })
         } else {
           console.error('市场概况API返回错误:', response.data)
           // 即使出错也要提示用户
@@ -927,7 +918,6 @@ export default {
 
         if (response.data.code === 200) {
           this.watchlist = response.data.data || []
-          console.log('Dashboard自选股数据:', this.watchlist)
         } else {
           console.error('获取自选股失败:', response.data.msg)
           // 回退到localStorage方式，但需要获取完整数据
@@ -983,7 +973,6 @@ export default {
           .filter(result => result.status === 'fulfilled' && result.value !== null)
           .map(result => result.value)
 
-        console.log('从localStorage获取自选股:', this.watchlist)
       } catch (error) {
         console.error('从localStorage加载自选股失败:', error)
         this.watchlist = []
@@ -1100,7 +1089,6 @@ export default {
           wsService.subscribe(tsCodes)
         }
         
-        console.log('WebSocket连接并订阅成功')
       } catch (error) {
         console.error('WebSocket连接失败:', error)
         this.$message.warning('实时数据连接失败，将使用定时刷新模式')

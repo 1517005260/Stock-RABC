@@ -1484,6 +1484,7 @@ def market_news_detail(request, news_id):
             'title': news.title,
             'content': news.content,
             'source': news.source,
+            'source_url': news.source_url,  # 添加原文链接字段
             'category': news.category,
             'publish_time': news.publish_time.strftime('%Y-%m-%d %H:%M:%S'),
             'related_stocks': news.related_stocks if news.related_stocks else [],

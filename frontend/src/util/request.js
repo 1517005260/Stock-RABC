@@ -19,21 +19,14 @@ httpService.interceptors.request.use(function (config) {
     // 在发送请求之前做些什么
     // 优先从Vuex store获取token，确保获取最新token
     const token = store.getters.getToken
-    
+
     if (token) {
         // 确保请求头中带有token
         config.headers.Authorization = `Bearer ${token}`
         // 也添加X-Token头，以兼容某些后端实现
         config.headers['X-Token'] = token
     }
-    
-    // 打印请求信息，便于调试
-    console.log('请求配置:', {
-        url: config.url,
-        method: config.method,
-        headers: config.headers
-    })
-    
+
     return config;
 }, function (error) {
     // 对请求错误做些什么
@@ -58,7 +51,7 @@ httpService.interceptors.response.use(
                 router.push('/403')
                 return Promise.reject(new Error(error.response.data.message || '权限不足'))
             }
-            
+
             // 处理其他错误
             if (error.response.status === 401) {
                 // token过期或无效
