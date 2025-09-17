@@ -70,7 +70,18 @@
           @click="viewNews(news)"
         >
           <div class="news-content">
-            <div class="news-title">{{ news.title }}</div>
+            <div class="news-title">
+              {{ news.title }}
+              <!-- 原文链接可用标识 -->
+              <el-tag
+                v-if="news.source_url || news.url"
+                type="success"
+                size="small"
+                class="original-link-tag"
+              >
+                可查看原文
+              </el-tag>
+            </div>
             <div class="news-summary">{{ news.summary || '暂无摘要' }}</div>
             <div class="news-meta">
               <span class="news-source">{{ news.source }}</span>
@@ -80,6 +91,17 @@
             </div>
           </div>
           <div class="news-actions">
+            <!-- 查看原文按钮 -->
+            <el-button
+              v-if="news.source_url || news.url"
+              type="primary"
+              size="small"
+              @click.stop="openOriginalNews(news)"
+            >
+              <el-icon><Link /></el-icon>
+              查看原文
+            </el-button>
+
             <!-- 管理员删除按钮 -->
             <el-button
               v-if="isAdmin"
@@ -91,6 +113,7 @@
               <el-icon><Delete /></el-icon>
               删除
             </el-button>
+
             <!-- 普通用户操作 -->
             <el-button text @click.stop="shareNews(news)">
               <el-icon><Share /></el-icon>
@@ -124,7 +147,7 @@
 </template>
 
 <script>
-import { Refresh, Search, Share, Star, Download, Delete } from '@element-plus/icons-vue'
+import { Refresh, Search, Share, Star, Download, Delete, Link } from '@element-plus/icons-vue'
 import { getLatestNews } from '@/api/stock'
 import { fetchLatestNews as fetchNewsAPI, deleteNews as deleteNewsAPI } from '@/api/trading'
 
@@ -136,7 +159,8 @@ export default {
     Share,
     Star,
     Download,
-    Delete
+    Delete,
+    Link
   },
   data() {
     return {
@@ -210,12 +234,54 @@ export default {
       this.loadNews()
     },
     viewNews(news) {
-      if (news.url) {
+      if (news.source_url || news.url) {
         // 如果有外部链接，打开新窗口
-        window.open(news.url, '_blank')
+        this.openOriginalNews(news)
       } else {
         // 否则跳转到内部详情页
         this.$router.push(`/stock/news/${news.id}`)
+      }
+    },
+
+    openOriginalNews(news) {
+      const url = news.source_url || news.url
+      if (url) {
+        // 在新标签页中打开原文链接
+        window.open(url, '_blank', 'noopener,noreferrer')
+
+        // 可选：记录点击统计
+        this.trackNewsClick(news)
+      } else {
+        this.$message.warning('该新闻暂无原文链接')
+      }
+    },
+
+    trackNewsClick(news) {
+      // 增加阅读计数（可选功能）
+      try {
+        const clickedNews = JSON.parse(localStorage.getItem('clicked_news') || '[]')
+        const existingIndex = clickedNews.findIndex(item => item.id === news.id)
+
+        if (existingIndex >= 0) {
+          clickedNews[existingIndex].clickCount = (clickedNews[existingIndex].clickCount || 0) + 1
+          clickedNews[existingIndex].lastClicked = new Date().toISOString()
+        } else {
+          clickedNews.unshift({
+            id: news.id,
+            title: news.title,
+            clickCount: 1,
+            lastClicked: new Date().toISOString()
+          })
+        }
+
+        // 保持最近100条点击记录
+        if (clickedNews.length > 100) {
+          clickedNews.splice(100)
+        }
+
+        localStorage.setItem('clicked_news', JSON.stringify(clickedNews))
+      } catch (error) {
+        console.warn('记录点击统计失败:', error)
       }
     },
     shareNews(news) {
@@ -407,6 +473,14 @@ export default {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.original-link-tag {
+  flex-shrink: 0;
 }
 
 .news-summary {
@@ -442,6 +516,15 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 120px;
+}
+
+.news-actions .el-button {
+  width: 100%;
+}
+
+.news-actions .el-button--primary {
+  margin-bottom: 8px;
 }
 
 .pagination {

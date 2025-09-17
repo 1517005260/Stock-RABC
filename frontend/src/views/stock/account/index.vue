@@ -362,22 +362,7 @@ export default {
     updateTradeChart() {
       if (!this.tradeChartInstance || !this.recentTrades.length) {
         // 如果没有数据，显示空图表
-        const emptyOption = {
-          title: {
-            text: '暂无交易数据',
-            subtext: '完成交易后将显示趋势',
-            left: 'center',
-            top: 'center',
-            textStyle: {
-              color: '#999',
-              fontSize: 14
-            },
-            subtextStyle: {
-              color: '#ccc',
-              fontSize: 12
-            }
-          }
-        }
+        const emptyOption = {}
         this.tradeChartInstance.setOption(emptyOption)
         return
       }
@@ -412,14 +397,6 @@ export default {
       const totalAmounts = dates.map(date => tradesByDate[date] || 0)
 
       const option = {
-        title: {
-          text: '交易金额趋势',
-          left: 'left',
-          textStyle: {
-            fontSize: 14,
-            fontWeight: 'normal'
-          }
-        },
         tooltip: {
           trigger: 'axis',
           axisPointer: {
@@ -438,16 +415,16 @@ export default {
         },
         legend: {
           data: ['买入金额', '卖出金额', '总交易额'],
-          top: 'bottom',
+          top: '8%',
           textStyle: {
-            fontSize: 12
+            fontSize: 11
           }
         },
         grid: {
-          left: '8%',
-          right: '4%',
-          bottom: '20%',
-          top: '20%',
+          left: '10%',
+          right: '8%',
+          bottom: '15%',
+          top: '25%',
           containLabel: true
         },
         xAxis: {
@@ -455,13 +432,13 @@ export default {
           boundaryGap: false,
           data: dates,
           axisLabel: {
-            fontSize: 11
+            fontSize: 10
           },
           name: '交易日期',
           nameLocation: 'middle',
-          nameGap: 25,
+          nameGap: 20,
           nameTextStyle: {
-            fontSize: 12,
+            fontSize: 11,
             color: '#666'
           }
         },
@@ -474,13 +451,13 @@ export default {
               }
               return '¥' + value.toFixed(0)
             },
-            fontSize: 11
+            fontSize: 10
           },
           name: '交易金额',
           nameLocation: 'middle',
-          nameGap: 50,
+          nameGap: 40,
           nameTextStyle: {
-            fontSize: 12,
+            fontSize: 11,
             color: '#666'
           },
           splitLine: {

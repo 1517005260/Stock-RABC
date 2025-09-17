@@ -30,7 +30,7 @@
           <el-icon><Star /></el-icon>
           {{ isCollected ? '已收藏' : '收藏' }}
         </el-button>
-        <el-button v-if="newsDetail.url" @click="openOriginal">
+        <el-button v-if="newsDetail.source_url || newsDetail.url" @click="openOriginal">
           <el-icon><Link /></el-icon>
           查看原文
         </el-button>
@@ -41,7 +41,7 @@
         <div v-if="newsDetail.content" v-html="newsDetail.content"></div>
         <div v-else class="no-content">
           <p>{{ newsDetail.summary || '暂无详细内容' }}</p>
-          <el-button v-if="newsDetail.url" type="primary" @click="openOriginal">
+          <el-button v-if="newsDetail.source_url || newsDetail.url" type="primary" @click="openOriginal">
             点击查看原文
           </el-button>
         </div>
@@ -209,8 +209,11 @@ export default {
       }
     },
     openOriginal() {
-      if (this.newsDetail.url) {
-        window.open(this.newsDetail.url, '_blank')
+      const url = this.newsDetail.source_url || this.newsDetail.url
+      if (url) {
+        window.open(url, '_blank', 'noopener,noreferrer')
+      } else {
+        this.$message.warning('该新闻暂无原文链接')
       }
     },
     searchByTag(tag) {

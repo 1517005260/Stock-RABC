@@ -570,69 +570,204 @@ class NewsService:
 
     @staticmethod
     def fetch_real_news_from_api(limit=20):
-        """从东方财富网获取真实财经新闻"""
-        import re
+        """Fetch real financial news from verified working sources"""
         import requests
+        from bs4 import BeautifulSoup
         from datetime import datetime
 
+        news_list = []
+
+        # Source 1: Yicai (第一财经) - tested and working
         try:
+            yicai_news = NewsService._fetch_from_yicai(limit)
+            if yicai_news:
+                news_list.extend(yicai_news)
+                print(f"Fetched {len(yicai_news)} news from Yicai")
+        except Exception as e:
+            print(f"Yicai source failed: {e}")
+
+        # Source 2: Sina Finance (with encoding fix)
+        if len(news_list) < limit:
+            try:
+                sina_news = NewsService._fetch_from_sina_fixed(limit - len(news_list))
+                if sina_news:
+                    news_list.extend(sina_news)
+                    print(f"Fetched {len(sina_news)} news from Sina Finance")
+            except Exception as e:
+                print(f"Sina Finance source failed: {e}")
+
+        # Source 3: NetEase Money (backup)
+        if len(news_list) < limit:
+            try:
+                netease_news = NewsService._fetch_from_netease(limit - len(news_list))
+                if netease_news:
+                    news_list.extend(netease_news)
+                    print(f"Fetched {len(netease_news)} news from NetEase")
+            except Exception as e:
+                print(f"NetEase source failed: {e}")
+
+        if not news_list:
+            print("All news sources failed - no news available")
+            return []
+
+        print(f"Successfully fetched {len(news_list)} real news items from working sources")
+        return news_list[:limit]
+
+    @staticmethod
+    def _fetch_from_yicai(limit=10):
+        """Fetch from Yicai (第一财经) - verified working source"""
+        import requests
+        from bs4 import BeautifulSoup
+
+        try:
+            url = "https://www.yicai.com/"
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Referer': 'http://finance.eastmoney.com/',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language': 'zh-CN,zh;q=0.8,en-US;q=0.5,en;q=0.3',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
             }
 
-            # 东方财富财经新闻页面
-            url = 'http://finance.eastmoney.com/news/cdfsd.html'
-            response = requests.get(url, headers=headers, timeout=10)
+            response = requests.get(url, headers=headers, timeout=15)
             response.encoding = 'utf-8'
 
             if response.status_code != 200:
-                print(f"请求失败，状态码: {response.status_code}")
                 return []
 
-            html_content = response.text
+            soup = BeautifulSoup(response.text, 'html.parser')
+            news_items = []
 
-            # 使用正则表达式提取新闻标题和链接
-            title_pattern = r'<a[^>]+href="([^"]+)"[^>]+title="([^"]+)"[^>]*target="_blank"[^>]*>([^<]*)</a>'
-            matches = re.findall(title_pattern, html_content)
+            # Look for article titles in headlines
+            titles = soup.find_all(['h1', 'h2', 'h3'])
 
-            news_list = []
-            for i, (url_path, title, text) in enumerate(matches):
-                if i >= limit:
-                    break
+            for title in titles:
+                text = title.get_text(strip=True)
+                if text and len(text) > 10 and len(text) < 80:
+                    # Find parent or child link
+                    link = title.find('a') or title.find_parent('a')
+                    url = link['href'] if link and link.get('href') else ''
 
-                # 过滤掉无效的新闻
-                if not title or len(title.strip()) < 5:
-                    continue
+                    if url and not url.startswith('http'):
+                        url = 'https://www.yicai.com' + url
 
-                # 确保URL是完整的
-                if url_path.startswith('//'):
-                    full_url = 'http:' + url_path
-                elif url_path.startswith('/'):
-                    full_url = 'http://finance.eastmoney.com' + url_path
-                elif not url_path.startswith('http'):
-                    full_url = 'http://finance.eastmoney.com/' + url_path
-                else:
-                    full_url = url_path
+                    news_item = {
+                        'title': text,
+                        'content': f"来源：第一财经\n\n{text}\n\n详细内容请访问原文链接。",
+                        'source': '第一财经',
+                        'url': url,
+                        'category': '财经资讯'
+                    }
+                    news_items.append(news_item)
 
-                news_item = {
-                    'title': title.strip(),
-                    'content': f"来源：东方财富网\n\n{title.strip()}\n\n详细内容请访问原文链接。",
-                    'source': '东方财富网',
-                    'url': full_url,
-                    'category': '财经资讯'
-                }
-                news_list.append(news_item)
+                    if len(news_items) >= limit:
+                        break
 
-            return news_list
+            return news_items
 
-        except requests.RequestException as e:
-            print(f"网络请求错误: {e}")
-            return []
         except Exception as e:
-            print(f"解析新闻失败: {e}")
+            print(f"Yicai fetch error: {e}")
+            return []
+
+    @staticmethod
+    def _fetch_from_sina_fixed(limit=10):
+        """Fetch from Sina Finance with proper encoding handling"""
+        import requests
+        from bs4 import BeautifulSoup
+
+        try:
+            url = "https://finance.sina.com.cn/"
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            }
+
+            response = requests.get(url, headers=headers, timeout=15)
+            response.encoding = 'utf-8'
+
+            if response.status_code != 200:
+                return []
+
+            soup = BeautifulSoup(response.text, 'html.parser')
+            news_items = []
+
+            # Look for finance news links
+            all_links = soup.find_all('a', href=True)
+
+            for link in all_links:
+                href = link.get('href', '')
+                title = link.get_text(strip=True)
+
+                # Filter for finance-related links with meaningful titles
+                if ('finance.sina.com.cn' in href or 'money.sina.com.cn' in href) and title and len(title) > 8 and len(title) < 100:
+                    full_url = href if href.startswith('http') else 'https:' + href
+
+                    news_item = {
+                        'title': title,
+                        'content': f"来源：新浪财经\n\n{title}\n\n详细内容请访问原文链接。",
+                        'source': '新浪财经',
+                        'url': full_url,
+                        'category': '财经资讯'
+                    }
+                    news_items.append(news_item)
+
+                    if len(news_items) >= limit:
+                        break
+
+            return news_items
+
+        except Exception as e:
+            print(f"Sina Finance fetch error: {e}")
+            return []
+
+    @staticmethod
+    def _fetch_from_netease(limit=10):
+        """Fetch from NetEase Money as backup source"""
+        import requests
+        from bs4 import BeautifulSoup
+
+        try:
+            url = "https://money.163.com/"
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            }
+
+            response = requests.get(url, headers=headers, timeout=15)
+            response.encoding = 'utf-8'
+
+            if response.status_code != 200:
+                return []
+
+            soup = BeautifulSoup(response.text, 'html.parser')
+            news_items = []
+
+            # Look for money.163.com links
+            links = soup.find_all('a', href=True)
+            netease_links = [link for link in links if 'money.163.com' in str(link.get('href', ''))]
+
+            for link in netease_links:
+                title = link.get_text(strip=True)
+                if title and len(title) > 10 and len(title) < 80:
+                    url = link['href']
+                    if not url.startswith('http'):
+                        url = 'https://money.163.com' + url
+
+                    news_item = {
+                        'title': title,
+                        'content': f"来源：网易财经\n\n{title}\n\n详细内容请访问原文链接。",
+                        'source': '网易财经',
+                        'url': url,
+                        'category': '财经资讯'
+                    }
+                    news_items.append(news_item)
+
+                    if len(news_items) >= limit:
+                        break
+
+            return news_items
+
+        except Exception as e:
+            print(f"NetEase fetch error: {e}")
             return []
 
     @staticmethod

@@ -4,7 +4,7 @@ import { ElMessage } from 'element-plus'
 import router from '@/router'
 import store from '@/store'
 
-let baseUrl="http://localhost:8000/";
+let baseUrl = process.env.VUE_APP_BASE_API || "http://localhost:8000/";
 // 创建axios实例
 const httpService = axios.create({
     // url前缀
