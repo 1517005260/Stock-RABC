@@ -575,11 +575,22 @@ def get_watchlist(request):
                 # 简单估算市值 (价格 * 流通股本估值，这里用成交量的1000倍作为估算)
                 market_cap = current_price * volume * 1000 if current_price and volume else 0
 
-                # 简单估算换手率 (成交量 / 流通股本 * 100%)
-                turnover_rate = (volume / (volume * 100)) * 100 if volume > 0 else 0
+                # 获取真实换手率和市盈率
+                from stock.realtime_service import get_real_pe_ratio, realtime_service
 
-                # 简单估算市盈率 (假设年化收益为价格的1/20)
-                pe_ratio = current_price / (current_price / 20) if current_price > 0 else 0
+                # 尝试获取实时PE和换手率
+                real_pe = get_real_pe_ratio(item.ts_code)
+
+                # 获取实时换手率
+                try:
+                    rt_data = realtime_service.get_stock_pe_ratio(item.ts_code)
+                    real_turnover = rt_data.get('turnover_rate', 0) if rt_data else 0
+                except:
+                    real_turnover = 0
+
+                # 使用实时数据或回退到估算
+                pe_ratio = real_pe if real_pe > 0 else 0
+                turnover_rate = real_turnover if real_turnover > 0 else ((volume / (volume * 100)) * 100 if volume > 0 else 0)
 
                 watch_data = {
                     'ts_code': item.ts_code,

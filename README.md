@@ -270,6 +270,9 @@ cd backend
 # 启动HTTP服务器
 python manage.py runserver
 
+# 如果启用websocket
+daphne -p 8000 app.asgi:application
+
 # 后端将在 http://localhost:8000 运行
 ```
 
